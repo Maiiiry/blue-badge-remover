@@ -63,6 +63,11 @@ describe('isProfilePage', () => {
     setPath('/elonmusk/followers');
     expect(isProfilePage()).toBe(false);
   });
+
+  it.each(['/i/history', '/i/history/likes'])('should return false for history page: %s', (path) => {
+    setPath(path);
+    expect(isProfilePage()).toBe(false);
+  });
 });
 
 describe('getPageType', () => {
@@ -98,6 +103,22 @@ describe('getPageType', () => {
   it('should return bookmarks for /i/bookmarks/folders subpath', () => {
     setPath('/i/bookmarks/folders/123');
     expect(getPageType()).toBe('bookmarks');
+  });
+
+  // X가 북마크·마음에 들어요를 /i/history(히스토리) 탭으로 옮김
+  it('should return bookmarks for /i/history (bookmarks tab)', () => {
+    setPath('/i/history');
+    expect(getPageType()).toBe('bookmarks');
+  });
+
+  it('should return bookmarks for /i/history/likes (likes tab)', () => {
+    setPath('/i/history/likes');
+    expect(getPageType()).toBe('bookmarks');
+  });
+
+  it('should return timeline for a profile whose handle starts with history', () => {
+    setPath('/historyfan');
+    expect(getPageType()).toBe('timeline');
   });
 
   it('should return timeline for user profile', () => {
