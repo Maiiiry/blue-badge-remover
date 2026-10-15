@@ -116,8 +116,8 @@ describe('getPageType', () => {
     expect(getPageType()).toBe('bookmarks');
   });
 
-  it('should return timeline for a profile whose handle starts with history', () => {
-    setPath('/historyfan');
+  it.each(['/i/historyfan', '/i/bookmarksx'])('should not treat %s as bookmarks (segment must match exactly)', (path) => {
+    setPath(path);
     expect(getPageType()).toBe('timeline');
   });
 
