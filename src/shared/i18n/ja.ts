@@ -59,7 +59,7 @@ export const ja: Translations = {
   aggressorFilter: '新規の高拡散アカウントを非表示',
   aggressorFilterDesc: '作成6か月以内・フォロワー1,000人以上・フォロー数/フォロワー数が10%以下の課金バッジアカウントを選別して非表示にします。',
   advancedFilterSettings: '高度なフィルター設定',
-  bookmarks: 'ブックマーク',
+  bookmarks: 'ブックマーク・いいね',
   lists: 'リスト',
   addToWhitelist: 'ホワイトリストに追加',
   addedToWhitelist: 'ホワイトリストに追加済み',

@@ -59,7 +59,7 @@ export const en: Translations = {
   aggressorFilter: 'Hide new high-reach accounts',
   aggressorFilterDesc: 'Hide paid badge accounts created within 6 months with at least 1,000 followers and a following-to-followers ratio of 10% or less.',
   advancedFilterSettings: 'Advanced Filter Settings',
-  bookmarks: 'Bookmarks',
+  bookmarks: 'Bookmarks & Likes',
   lists: 'Lists',
   addToWhitelist: 'Add to Whitelist',
   addedToWhitelist: 'Added to Whitelist',
