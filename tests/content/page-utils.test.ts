@@ -116,7 +116,7 @@ describe('getPageType', () => {
     expect(getPageType()).toBe('bookmarks');
   });
 
-  it.each(['/i/historyfan', '/i/bookmarksx'])('should not treat %s as bookmarks (segment must match exactly)', (path) => {
+  it.each(['/i/historyfan', '/i/bookmarksx', '/someone/i/history'])('should not treat %s as bookmarks (path must start with the exact segments)', (path) => {
     setPath(path);
     expect(getPageType()).toBe('timeline');
   });
