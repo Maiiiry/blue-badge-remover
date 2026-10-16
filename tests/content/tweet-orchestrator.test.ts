@@ -482,6 +482,19 @@ describe('processTweet', () => {
       Object.defineProperty(window, 'location', { value: originalLocation, writable: true, configurable: true });
     }
   });
+
+  it('범위를 끈 뒤 다시 판정하면 인용 파딱으로 숨겨졌던 트윗을 복원한다', () => {
+    vi.mocked(isPageFilterEnabled).mockReturnValue(false);
+    vi.mocked(getQuoteAction).mockReturnValue('hide-entire');
+    mockDetectBadgeSvg.mockReturnValue(true);
+    const tweet = createTweetEl('author_a');
+    appendQuoteBlock(tweet, { badge: true });
+    tweet.setAttribute('data-bbr-original', 'hidden');
+    tweet.setAttribute('data-bbr-reason', 'quote-entire');
+    processTweet(tweet);
+    expect(mockShowTweet).toHaveBeenCalledWith(tweet);
+    expect(mockHideTweet).not.toHaveBeenCalled();
+  });
 });
 
 // --- A5: applyCurrentUserFallback ---

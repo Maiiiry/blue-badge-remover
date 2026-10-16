@@ -109,7 +109,7 @@ export function classifyTweet(input: ClassifyInput): ClassifyResult {
 }
 
 /** 파딱 리트윗 분류 — 필터링 범위가 꺼진 화면이면 리트윗 필터와 무관하게 표시 */
-function classifyRetweet(settings: Settings, pageType: PageType, match: Partial<ClassifyResult> = {}): ClassifyResult {
+function classifyRetweet(settings: Settings, pageType: PageType, match: Partial<Pick<ClassifyResult, 'matchedRule' | 'packId' | 'category'>> = {}): ClassifyResult {
   if (!isPageFilterEnabled(settings, pageType)) return { action: 'show', reason: 'page-filter-off' };
   return shouldHideRetweet({ settings, isFadak: true, isRetweet: true })
     ? { action: 'hide', reason: 'retweet', ...match }
