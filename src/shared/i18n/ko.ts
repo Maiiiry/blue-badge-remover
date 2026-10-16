@@ -59,7 +59,7 @@ export const ko = {
   aggressorFilter: '신규 고확산 계정 숨기기',
   aggressorFilterDesc: '생성 6개월 이내·팔로워 1천 명 이상·팔로잉/팔로워 비율 10% 이하인 파딱 계정을 선별해 숨깁니다.',
   advancedFilterSettings: '고급 필터 설정',
-  bookmarks: '북마크',
+  bookmarks: '북마크·마음에 들어요',
   lists: '리스트',
   addToWhitelist: '화이트리스트에 추가',
   addedToWhitelist: '화이트리스트에 추가됨',
