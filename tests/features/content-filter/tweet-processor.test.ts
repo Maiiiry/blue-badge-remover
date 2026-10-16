@@ -1,6 +1,6 @@
 // tests/features/content-filter/tweet-processor.test.ts
 import { describe, it, expect } from 'vitest';
-import { shouldHideTweet, shouldHideRetweet, getQuoteAction } from '@features/content-filter/tweet-processor';
+import { shouldHideTweet, shouldHideRetweet, getQuoteAction, isPageFilterEnabled } from '@features/content-filter/tweet-processor';
 import type { Settings } from '@shared/types';
 import { DEFAULT_SETTINGS } from '@shared/constants';
 
@@ -82,6 +82,20 @@ describe('shouldHideTweet', () => {
     };
     const ctx = { ...baseContext, settings, pageType: 'bookmarks' as const };
     expect(shouldHideTweet(ctx)).toBe(true);
+  });
+});
+
+describe('isPageFilterEnabled', () => {
+  it('should follow the filter toggle of each page type', () => {
+    const settings: Settings = {
+      ...DEFAULT_SETTINGS,
+      filter: { timeline: true, replies: false, search: true, bookmarks: false, lists: true },
+    };
+    expect(isPageFilterEnabled(settings, 'timeline')).toBe(true);
+    expect(isPageFilterEnabled(settings, 'replies')).toBe(false);
+    expect(isPageFilterEnabled(settings, 'search')).toBe(true);
+    expect(isPageFilterEnabled(settings, 'bookmarks')).toBe(false);
+    expect(isPageFilterEnabled(settings, 'lists')).toBe(true);
   });
 });
 

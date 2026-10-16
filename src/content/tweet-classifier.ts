@@ -1,6 +1,6 @@
 // src/content/tweet-classifier.ts
 // 순수 분류 함수: DOM 접근 없이 입력 데이터만으로 트윗 숨김 판정.
-import { shouldHideTweet, shouldHideRetweet, getQuoteAction, type PageType } from '@features/content-filter';
+import { shouldHideTweet, shouldHideRetweet, getQuoteAction, isPageFilterEnabled, type PageType } from '@features/content-filter';
 import { isAggressorProfile, matchesKeywordFilter, matchesProtectedKeyword } from '@features/keyword-filter';
 import type { FilterRule, Settings, ProfileInfo, KeywordMatchResult } from '@shared/types';
 
@@ -43,6 +43,7 @@ export interface QuoteClassifyInput {
   parentIsWhitelisted: boolean;
   retweeterExempt: boolean;
   settings: Settings;
+  pageType: PageType;
 }
 
 export interface QuoteClassifyResult {
@@ -86,10 +87,7 @@ export function classifyTweet(input: ClassifyInput): ClassifyResult {
     }
     // 활성화된 조건 중 하나라도 매칭됨 — 숨김 진행, 키워드 매칭 정보가 있으면 포함
     if (isRetweet) {
-      const shouldHide = shouldHideRetweet({ settings, isFadak: true, isRetweet: true });
-      return shouldHide
-        ? { action: 'hide', reason: 'retweet', matchedRule: result.matchedRule, packId: result.packId, category: result.category }
-        : { action: 'show', reason: 'retweet-filter-off' };
+      return classifyRetweet(settings, pageType, { matchedRule: result.matchedRule, packId: result.packId, category: result.category });
     }
     const hide = shouldHideTweet({
       settings, followList: EMPTY_SET as Set<string>, whitelist: EMPTY_SET as Set<string>,
@@ -101,10 +99,7 @@ export function classifyTweet(input: ClassifyInput): ClassifyResult {
   }
 
   // 키워드 필터 비활성 — 전체 파딱 숨김
-  if (isRetweet) {
-    const shouldHide = shouldHideRetweet({ settings, isFadak: true, isRetweet: true });
-    return shouldHide ? { action: 'hide', reason: 'retweet' } : { action: 'show', reason: 'retweet-filter-off' };
-  }
+  if (isRetweet) return classifyRetweet(settings, pageType);
 
   const hide = shouldHideTweet({
     settings, followList: EMPTY_SET as Set<string>, whitelist: EMPTY_SET as Set<string>,
@@ -113,9 +108,17 @@ export function classifyTweet(input: ClassifyInput): ClassifyResult {
   return hide ? { action: 'hide', reason: 'fadak' } : { action: 'show', reason: 'page-filter-off' };
 }
 
+/** 파딱 리트윗 분류 — 필터링 범위가 꺼진 화면이면 리트윗 필터와 무관하게 표시 */
+function classifyRetweet(settings: Settings, pageType: PageType, match: Partial<Pick<ClassifyResult, 'matchedRule' | 'packId' | 'category'>> = {}): ClassifyResult {
+  if (!isPageFilterEnabled(settings, pageType)) return { action: 'show', reason: 'page-filter-off' };
+  return shouldHideRetweet({ settings, isFadak: true, isRetweet: true })
+    ? { action: 'hide', reason: 'retweet', ...match }
+    : { action: 'show', reason: 'retweet-filter-off' };
+}
+
 /** 인용 트윗 분류 (순수 함수) */
 export function classifyQuote(input: QuoteClassifyInput): QuoteClassifyResult {
-  const { quotedHandle, quotedIsFadak, quotedInFollow, quotedIsWhitelisted, parentHandle, parentInFollow, parentIsWhitelisted, retweeterExempt, settings } = input;
+  const { quotedHandle, quotedIsFadak, quotedInFollow, quotedIsWhitelisted, parentHandle, parentInFollow, parentIsWhitelisted, retweeterExempt, settings, pageType } = input;
   const parentExempt = parentInFollow || parentIsWhitelisted;
 
   // self-quote: 예외 부모(팔로우/화이트리스트)가 자기 트윗을 인용
@@ -125,6 +128,7 @@ export function classifyQuote(input: QuoteClassifyInput): QuoteClassifyResult {
 
   if (!quotedIsFadak) return { action: 'show', reason: 'not-fadak' };
   if (quotedInFollow || quotedIsWhitelisted) return { action: 'show', reason: quotedInFollow ? 'follow' : 'whitelist' };
+  if (!isPageFilterEnabled(settings, pageType)) return { action: 'show', reason: 'page-filter-off' };
 
   const quoteAction = getQuoteAction(settings, true);
   if (quoteAction === 'hide-entire') {

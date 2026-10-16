@@ -23,16 +23,20 @@ export function shouldHideTweet(ctx: TweetContext): boolean {
   // followList 체크는 content script에서 수행 (idToHandle 매핑 필요)
   // 여기서는 whitelist만 체크
   if (ctx.whitelist.has(toWhitelistProbe(ctx.handle))) return false;
+  return isPageFilterEnabled(ctx.settings, ctx.pageType);
+}
 
+/** 필터링 범위 토글 — 작성자·리트윗·인용 숨김 모두 이 토글이 켜진 화면에서만 적용한다 */
+export function isPageFilterEnabled(settings: Settings, pageType: PageType): boolean {
   const filterMap: Record<PageType, boolean> = {
-    timeline: ctx.settings.filter.timeline,
-    replies: ctx.settings.filter.replies,
-    search: ctx.settings.filter.search,
-    bookmarks: ctx.settings.filter.bookmarks,
-    lists: ctx.settings.filter.lists,
+    timeline: settings.filter.timeline,
+    replies: settings.filter.replies,
+    search: settings.filter.search,
+    bookmarks: settings.filter.bookmarks,
+    lists: settings.filter.lists,
   };
 
-  return filterMap[ctx.pageType] ?? false;
+  return filterMap[pageType] ?? false;
 }
 
 export interface RetweetContext {

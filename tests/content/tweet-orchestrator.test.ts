@@ -28,6 +28,7 @@ const mockReleasePreservedHeights = vi.fn();
 vi.mock('@features/content-filter', () => ({
   shouldHideTweet: vi.fn().mockReturnValue(true),
   shouldHideRetweet: vi.fn().mockReturnValue(true),
+  isPageFilterEnabled: vi.fn().mockReturnValue(true),
   getQuoteAction: vi.fn().mockReturnValue('none' as const),
   hideTweet: (...args: unknown[]) => mockHideTweet(...args),
   showExpandedTweet: (...args: unknown[]) => mockShowExpandedTweet(...args),
@@ -55,7 +56,7 @@ vi.mock('@shared/utils/logger', () => ({
   logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
 
-import { getQuoteAction } from '@features/content-filter';
+import { getQuoteAction, isPageFilterEnabled } from '@features/content-filter';
 import {
   setSettings,
   setFollowSet,
@@ -158,6 +159,7 @@ beforeEach(() => {
   mockIsBlueBadgeElement.mockReturnValue(true);
   // vi.clearAllMocks는 mockReturnValue를 지우지 않으므로 per-test override 누수 방지
   vi.mocked(getQuoteAction).mockReturnValue('none');
+  vi.mocked(isPageFilterEnabled).mockReturnValue(true);
 });
 
 describe('processTweet', () => {
@@ -459,6 +461,39 @@ describe('processTweet', () => {
       expect.any(Function),
     );
     expect(mockHideQuoteBlock).not.toHaveBeenCalled();
+  });
+
+  it('필터링 범위가 꺼진 화면(북마크)에서는 인용 파딱이 있어도 숨기지 않는다', () => {
+    const originalLocation = window.location;
+    Object.defineProperty(window, 'location', {
+      value: { ...originalLocation, pathname: '/i/bookmarks' }, writable: true, configurable: true,
+    });
+    try {
+      vi.mocked(isPageFilterEnabled).mockImplementation((_settings, pageType) => pageType !== 'bookmarks');
+      vi.mocked(getQuoteAction).mockReturnValue('hide-entire');
+      mockDetectBadgeSvg.mockReturnValue(true);
+      const tweet = createTweetEl('author_a');
+      appendQuoteBlock(tweet, { badge: true });
+      processTweet(tweet);
+      expect(isPageFilterEnabled).toHaveBeenCalledWith(expect.anything(), 'bookmarks');
+      expect(mockHideTweet).not.toHaveBeenCalled();
+      expect(mockHideQuoteBlock).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(window, 'location', { value: originalLocation, writable: true, configurable: true });
+    }
+  });
+
+  it('범위를 끈 뒤 다시 판정하면 인용 파딱으로 숨겨졌던 트윗을 복원한다', () => {
+    vi.mocked(isPageFilterEnabled).mockReturnValue(false);
+    vi.mocked(getQuoteAction).mockReturnValue('hide-entire');
+    mockDetectBadgeSvg.mockReturnValue(true);
+    const tweet = createTweetEl('author_a');
+    appendQuoteBlock(tweet, { badge: true });
+    tweet.setAttribute('data-bbr-original', 'hidden');
+    tweet.setAttribute('data-bbr-reason', 'quote-entire');
+    processTweet(tweet);
+    expect(mockShowTweet).toHaveBeenCalledWith(tweet);
+    expect(mockHideTweet).not.toHaveBeenCalled();
   });
 });
 

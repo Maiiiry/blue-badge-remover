@@ -192,6 +192,7 @@ function processQuoteBlock(
     parentIsWhitelisted: isHandleWhitelisted(parentHandle),
     retweeterExempt,
     settings,
+    pageType: getPageType(),
   });
 
   if (result.action === 'hide-entire') {
