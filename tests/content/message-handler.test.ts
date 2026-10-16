@@ -53,10 +53,12 @@ vi.mock('../../src/content/tweet-orchestrator', () => ({
 
 const mockSaveFollowHandles = vi.fn<() => Promise<void>>();
 const mockRemoveFollowHandles = vi.fn<() => Promise<void>>();
+const mockIsRecentlyFollowed = vi.fn<(handle: string) => boolean>();
 const mockGetMyHandle = vi.fn<() => string | null>();
 vi.mock('../../src/content/follow-collector', () => ({
   saveFollowHandles: (...args: unknown[]) => mockSaveFollowHandles(...(args as [])),
   removeFollowHandles: (...args: unknown[]) => mockRemoveFollowHandles(...(args as [])),
+  isRecentlyFollowed: (handle: string) => mockIsRecentlyFollowed(handle),
   getMyHandle: () => mockGetMyHandle(),
 }));
 
@@ -126,6 +128,7 @@ describe('message-handler', () => {
     (profileCache as unknown as { cache: Map<string, unknown> }).cache.clear();
     mockSaveFollowHandles.mockResolvedValue(undefined);
     mockRemoveFollowHandles.mockResolvedValue(undefined);
+    mockIsRecentlyFollowed.mockReturnValue(false);
     mockGetMyHandle.mockReturnValue(null);
     // Reset location to default
     Object.defineProperty(window, 'location', {
@@ -476,6 +479,34 @@ describe('message-handler', () => {
 
         expect(mockRemoveFollowHandles).not.toHaveBeenCalled();
         expect(getFollowSet().has('friend')).toBe(true);
+      });
+
+      // 팔로우 클릭 전에 출발한 요청의 응답이 방금 팔로우한 계정을 지우지 못하게 한다
+      it('방금 팔로우로 기록된 핸들은 지우지 않는다', () => {
+        setFollowSet(new Set(['just_followed', 'polluted']));
+        mockIsRecentlyFollowed.mockImplementation((handle) => handle === 'just_followed');
+
+        dispatchMessage({
+          type: MESSAGE_TYPES.FOLLOW_DATA,
+          source: 'api-not-following',
+          handles: ['just_followed', 'polluted'],
+        });
+
+        expect(getFollowSet().has('just_followed')).toBe(true);
+        expect(mockRemoveFollowHandles).toHaveBeenCalledWith(['polluted'], deps, 'myaccount');
+      });
+
+      it('본인 핸들은 지우지 않는다', () => {
+        setFollowSet(new Set(['myaccount']));
+
+        dispatchMessage({
+          type: MESSAGE_TYPES.FOLLOW_DATA,
+          source: 'api-not-following',
+          handles: ['MyAccount'],
+        });
+
+        expect(getFollowSet().has('myaccount')).toBe(true);
+        expect(mockRemoveFollowHandles).not.toHaveBeenCalled();
       });
 
       it('목록에서 뺀 핸들의 트윗을 다시 판정한다', () => {

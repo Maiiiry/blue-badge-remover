@@ -5,7 +5,7 @@ import { logger } from '@shared/utils/logger';
 import { profileCache, collectorBuffer, getSettings, getFollowSet, getProtectedKeywords, getCurrentUserHandle } from './state';
 import { extractRetweeterHandle, extractTweetAuthor } from './tweet-processing';
 import { processTweet } from './tweet-orchestrator';
-import { saveFollowHandles, removeFollowHandles, getMyHandle, type FollowCollectorDeps } from './follow-collector';
+import { saveFollowHandles, removeFollowHandles, isRecentlyFollowed, getMyHandle, type FollowCollectorDeps } from './follow-collector';
 import { removeFadakBanner } from './fadak-banner';
 import type { ProfileInfo } from '@shared/types';
 
@@ -231,9 +231,12 @@ function handleFollowData(data: { handles: unknown[]; account: string; source?: 
 }
 
 // API가 팔로우 안 함으로 확인한 핸들을 목록에서 뺀다 — 예전 버그로 오염된 목록이 탐색 중에 스스로 정리된다.
+// 방금 팔로우한 계정(그 전에 출발한 요청의 응답일 수 있음)과 본인 핸들은 건드리지 않는다.
 function removeNotFollowing(handles: string[], followCollectorDeps: FollowCollectorDeps, account: string): void {
   const followSet = getFollowSet();
-  const stale = [...new Set(handles.map((h) => h.toLowerCase()))].filter((h) => followSet.has(h));
+  const self = getCurrentUserHandle()?.toLowerCase();
+  const stale = [...new Set(handles.map((h) => h.toLowerCase()))]
+    .filter((h) => followSet.has(h) && h !== self && !isRecentlyFollowed(h));
   if (stale.length === 0) return;
   for (const h of stale) followSet.delete(h);
   if (getSettings().debugMode) logger.debug('Not-following handles removed', { count: stale.length });

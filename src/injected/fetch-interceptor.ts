@@ -3,7 +3,7 @@
 // where extension module imports (chrome.runtime, @shared paths) are unavailable.
 // To keep them in sync, tests/injected/fetch-interceptor-constants.test.ts
 // asserts that these values match the shared constants.
-import { findUserObjects, findFollowedHandles, extractFollowingFromUsers, extractNotFollowingFromUsers, dedupeFollowHandles, extractProfileEntries, isFollowingEndpoint, type ProfileEntry } from './data-extractors';
+import { findUserObjects, extractFollowingFromUsers, extractNotFollowingFromUsers, extractFollowingListHandles, dedupeFollowHandles, extractProfileEntries, isFollowingEndpoint, type ProfileEntry } from './data-extractors';
 import { FiberFollowObserver } from './fiber-follow-observer';
 import { FollowBridge, type FollowSource } from './follow-bridge';
 import { splitProfileBatches } from './profile-batches';
@@ -199,9 +199,7 @@ function postTimelineFollowData(
 // extractViewerUserId / findViewerId 제거됨 — 수신 리스너 없는 죽은 코드
 
 function extractFollowData(data: unknown, account?: string | null): void {
-  const handles: string[] = [];
-  findFollowedHandles(data, handles);
-  const uniqueHandles = [...new Set(handles.map((handle) => handle.toLowerCase()))];
+  const uniqueHandles = extractFollowingListHandles(data);
   if (uniqueHandles.length > 0) {
     fiberFollowObserver.markReported(uniqueHandles);
     followBridge.send(uniqueHandles, undefined, account);

@@ -30,6 +30,7 @@ const {
   collectFollowsFromDOM,
   disconnectFollowObserver,
   getMyHandle,
+  isRecentlyFollowed,
   removeFollowHandle,
   removeFollowHandles,
   resolveAccountSwitchFollows,
@@ -404,5 +405,15 @@ describe('saveFollowHandles concurrency (Defect 2)', () => {
 
     expect(browser.storage.local.set).not.toHaveBeenCalled();
     expect(deps.setFollowSet).not.toHaveBeenCalled();
+  });
+
+  it('saveFollowHandles로 기록한 핸들은 60초 동안 방금 팔로우한 것으로 본다', async () => {
+    const before = Date.now();
+    await saveFollowHandles(['Fresh'], makeDeps());
+
+    expect(isRecentlyFollowed('fresh', before + 59_000)).toBe(true);
+    expect(isRecentlyFollowed('FRESH', before + 59_000)).toBe(true);
+    expect(isRecentlyFollowed('fresh', Date.now() + 60_000)).toBe(false);
+    expect(isRecentlyFollowed('never_saved')).toBe(false);
   });
 });

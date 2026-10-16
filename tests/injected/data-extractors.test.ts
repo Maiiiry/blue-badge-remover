@@ -6,6 +6,7 @@ import {
   dedupeFollowHandles,
   extractProfileEntries,
   extractNotFollowingFromUsers,
+  extractFollowingListHandles,
   isFollowingEndpoint,
   type FollowingUserMatch,
 } from '../../src/injected/data-extractors';
@@ -454,5 +455,18 @@ describe('extractNotFollowingFromUsers', () => {
       { core: { screen_name: 'dup' }, relationship_perspectives: { following: false } },
     ];
     expect(extractNotFollowingFromUsers(users)).toEqual(['dup']);
+  });
+});
+
+describe('extractFollowingListHandles', () => {
+  it('Following 응답의 user_results 핸들을 소문자로 모으되, 같은 응답에서 following:false인 유저는 뺀다', () => {
+    const data = {
+      entries: [
+        { user_results: { result: { rest_id: '1', is_blue_verified: false, core: { screen_name: 'Friend' }, relationship_perspectives: { following: true } } } },
+        { user_results: { result: { rest_id: '2', is_blue_verified: true, core: { screen_name: 'Suggested' }, relationship_perspectives: { following: false } } } },
+        { user_results: { result: { rest_id: '3', is_blue_verified: false, core: { screen_name: 'NoRelation' } } } },
+      ],
+    };
+    expect(extractFollowingListHandles(data)).toEqual(['friend', 'norelation']);
   });
 });

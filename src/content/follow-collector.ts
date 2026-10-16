@@ -51,12 +51,23 @@ export function runFollowStorageTask<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
+// 팔로우로 기록한 시각 — 그 전에 출발한 요청의 응답(following:false)이 방금 팔로우한 계정을 지우지 못하게 한다
+const RECENT_FOLLOW_GRACE_MS = 60_000;
+const recentFollowAt = new Map<string, number>();
+
+export function isRecentlyFollowed(handle: string, now = Date.now()): boolean {
+  const at = recentFollowAt.get(handle.toLowerCase());
+  return at !== undefined && now - at < RECENT_FOLLOW_GRACE_MS;
+}
+
 export function saveFollowHandles(
   handles: string[],
   deps: FollowCollectorDeps,
   expectedAccount?: string,
 ): Promise<void> {
   if (!handles.length) return Promise.resolve();
+  const now = Date.now();
+  for (const handle of handles) recentFollowAt.set(handle.toLowerCase(), now);
   return runFollowStorageTask(() => doSaveFollowHandles(handles, deps, expectedAccount));
 }
 

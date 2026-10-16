@@ -140,6 +140,16 @@ export function extractNotFollowingFromUsers(users: Array<Record<string, unknown
   return [...result];
 }
 
+// Following 응답에서 팔로우 핸들 추출 — 같은 응답에서 following:false로 확인된 유저(추천 등)는 뺀다
+export function extractFollowingListHandles(data: unknown): string[] {
+  const handles: string[] = [];
+  findFollowedHandles(data, handles);
+  const users: Array<Record<string, unknown>> = [];
+  findUserObjects(data, users);
+  const notFollowing = new Set(extractNotFollowingFromUsers(users));
+  return [...new Set(handles.map((handle) => handle.toLowerCase()))].filter((handle) => !notFollowing.has(handle));
+}
+
 // GraphQL 오퍼레이션 이름(쿼리스트링 앞 경로의 마지막 세그먼트)이 정확히 Following인지 본다.
 // X가 모든 GraphQL 요청 쿼리스트링에 responsive_web_grok_analyze_post_followups_enabled 플래그를 붙이면서
 // url.includes('follow')가 항상 참이 되어 모든 응답의 작성자가 팔로우로 저장되었다. Followers 목록도 제외한다.
