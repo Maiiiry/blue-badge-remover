@@ -61,7 +61,16 @@ export function saveFollowHandles(
 }
 
 export function removeFollowHandle(handle: string, deps: FollowCollectorDeps): Promise<void> {
-  return runFollowStorageTask(() => doRemoveFollowHandle(handle, deps));
+  return removeFollowHandles([handle], deps);
+}
+
+export function removeFollowHandles(
+  handles: string[],
+  deps: FollowCollectorDeps,
+  expectedAccount?: string,
+): Promise<void> {
+  if (!handles.length) return Promise.resolve();
+  return runFollowStorageTask(() => doRemoveFollowHandles(handles, deps, expectedAccount));
 }
 
 export interface AccountSwitchResult {
@@ -121,16 +130,18 @@ async function doSaveFollowHandles(
   if (settings.debugMode) logger.info('Follow handles saved', { account: currentAccount, newCount: handles.length, totalCount: merged.length });
 }
 
-async function doRemoveFollowHandle(
-  handle: string,
+async function doRemoveFollowHandles(
+  handles: string[],
   deps: FollowCollectorDeps,
+  expectedAccount?: string,
 ): Promise<void> {
-  const lower = handle.toLowerCase();
+  const targets = new Set(handles.map((handle) => handle.toLowerCase()));
   const stored = await browser.storage.local.get([STORAGE_KEYS.FOLLOW_CACHE, STORAGE_KEYS.CURRENT_USER_ID]);
   const currentAccount = (stored[STORAGE_KEYS.CURRENT_USER_ID] as string | null) ?? '';
+  if (expectedAccount && currentAccount !== expectedAccount) return;
   const cache = (stored[STORAGE_KEYS.FOLLOW_CACHE] as Record<string, string[]> | undefined) ?? {};
   const existing = currentAccount ? (cache[currentAccount] ?? []) : [];
-  const filtered = existing.filter((h) => h !== lower);
+  const filtered = existing.filter((h) => !targets.has(h));
   if (currentAccount) {
     cache[currentAccount] = filtered;
   }
@@ -140,7 +151,7 @@ async function doRemoveFollowHandle(
   });
   deps.setFollowSet(new Set(filtered));
   const settings = deps.getCurrentSettings();
-  if (settings.debugMode) logger.info('Follow handle removed', { handle: lower, totalCount: filtered.length });
+  if (settings.debugMode) logger.info('Follow handles removed', { count: targets.size, totalCount: filtered.length });
 }
 
 function extractHandlesFromDOM(): string[] {

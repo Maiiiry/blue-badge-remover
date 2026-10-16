@@ -52,9 +52,11 @@ vi.mock('../../src/content/tweet-orchestrator', () => ({
 }));
 
 const mockSaveFollowHandles = vi.fn<() => Promise<void>>();
+const mockRemoveFollowHandles = vi.fn<() => Promise<void>>();
 const mockGetMyHandle = vi.fn<() => string | null>();
 vi.mock('../../src/content/follow-collector', () => ({
   saveFollowHandles: (...args: unknown[]) => mockSaveFollowHandles(...(args as [])),
+  removeFollowHandles: (...args: unknown[]) => mockRemoveFollowHandles(...(args as [])),
   getMyHandle: () => mockGetMyHandle(),
 }));
 
@@ -123,6 +125,7 @@ describe('message-handler', () => {
     // Clear singleton cache (mock class exposes clear())
     (profileCache as unknown as { cache: Map<string, unknown> }).cache.clear();
     mockSaveFollowHandles.mockResolvedValue(undefined);
+    mockRemoveFollowHandles.mockResolvedValue(undefined);
     mockGetMyHandle.mockReturnValue(null);
     // Reset location to default
     Object.defineProperty(window, 'location', {
@@ -442,6 +445,55 @@ describe('message-handler', () => {
 
         expect(mockRestoreHiddenTweets).not.toHaveBeenCalled();
         expect(mockReprocessExistingTweets).not.toHaveBeenCalled();
+      });
+    });
+
+    // 예전 버그로 오염된 팔로우 목록을 API가 알려준 실제 관계로 정리한다
+    describe("source 'api-not-following' (API가 팔로우 안 함으로 확인)", () => {
+      it('followSet에 있는 핸들만 빼고 removeFollowHandles로 저장소에서도 지운다', () => {
+        setFollowSet(new Set(['polluted', 'friend']));
+
+        dispatchMessage({
+          type: MESSAGE_TYPES.FOLLOW_DATA,
+          source: 'api-not-following',
+          handles: ['Polluted', 'stranger'],
+        });
+
+        expect(getFollowSet().has('polluted')).toBe(false);
+        expect(getFollowSet().has('friend')).toBe(true);
+        expect(mockRemoveFollowHandles).toHaveBeenCalledWith(['polluted'], deps, 'myaccount');
+        expect(mockSaveFollowHandles).not.toHaveBeenCalled();
+      });
+
+      it('followSet에 없는 핸들뿐이면 저장소를 건드리지 않는다', () => {
+        setFollowSet(new Set(['friend']));
+
+        dispatchMessage({
+          type: MESSAGE_TYPES.FOLLOW_DATA,
+          source: 'api-not-following',
+          handles: ['stranger'],
+        });
+
+        expect(mockRemoveFollowHandles).not.toHaveBeenCalled();
+        expect(getFollowSet().has('friend')).toBe(true);
+      });
+
+      it('목록에서 뺀 핸들의 트윗을 다시 판정한다', () => {
+        setFollowSet(new Set(['polluted']));
+        const tweet = document.createElement('article');
+        tweet.dataset.testid = 'tweet';
+        document.body.appendChild(tweet);
+        mockExtractTweetAuthor.mockReturnValue({ handle: 'Polluted' });
+        mockExtractRetweeterHandle.mockReturnValue(null);
+
+        dispatchMessage({
+          type: MESSAGE_TYPES.FOLLOW_DATA,
+          source: 'api-not-following',
+          handles: ['polluted'],
+        });
+        vi.runAllTimers();
+
+        expect(mockProcessTweet).toHaveBeenCalledWith(tweet);
       });
     });
 
