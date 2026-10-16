@@ -30,7 +30,9 @@ const {
   collectFollowsFromDOM,
   disconnectFollowObserver,
   getMyHandle,
+  isRecentlyFollowed,
   removeFollowHandle,
+  removeFollowHandles,
   resolveAccountSwitchFollows,
   runFollowStorageTask,
   saveFollowHandles,
@@ -379,5 +381,39 @@ describe('saveFollowHandles concurrency (Defect 2)', () => {
 
     expect(browser.storage.local.set).not.toHaveBeenCalled();
     expect(deps.setFollowSet).not.toHaveBeenCalled();
+  });
+
+  it('removeFollowHandles는 여러 핸들을 한 번에 현재 계정 목록에서만 지운다', async () => {
+    mockChromeStorage[STORAGE_KEYS.FOLLOW_CACHE] = { testuser: ['a', 'b', 'c'], other: ['a'] };
+    mockChromeStorage[STORAGE_KEYS.FOLLOW_LIST] = ['a', 'b', 'c'];
+    const deps = makeDeps();
+
+    await removeFollowHandles(['A', 'c'], deps, 'testuser');
+
+    const cache = mockChromeStorage[STORAGE_KEYS.FOLLOW_CACHE] as Record<string, string[]>;
+    expect(cache['testuser']).toEqual(['b']);
+    expect(cache['other']).toEqual(['a']);
+    expect(mockChromeStorage[STORAGE_KEYS.FOLLOW_LIST]).toEqual(['b']);
+    expect(deps.setFollowSet).toHaveBeenCalledWith(new Set(['b']));
+  });
+
+  it('removeFollowHandles는 메시지 수신 뒤 계정이 바뀌었으면 지우지 않는다', async () => {
+    mockChromeStorage[STORAGE_KEYS.FOLLOW_CACHE] = { testuser: ['a'] };
+    const deps = makeDeps();
+
+    await removeFollowHandles(['a'], deps, 'other-account');
+
+    expect(browser.storage.local.set).not.toHaveBeenCalled();
+    expect(deps.setFollowSet).not.toHaveBeenCalled();
+  });
+
+  it('saveFollowHandles로 기록한 핸들은 60초 동안 방금 팔로우한 것으로 본다', async () => {
+    const before = Date.now();
+    await saveFollowHandles(['Fresh'], makeDeps());
+
+    expect(isRecentlyFollowed('fresh', before + 59_000)).toBe(true);
+    expect(isRecentlyFollowed('FRESH', before + 59_000)).toBe(true);
+    expect(isRecentlyFollowed('fresh', Date.now() + 60_000)).toBe(false);
+    expect(isRecentlyFollowed('never_saved')).toBe(false);
   });
 });

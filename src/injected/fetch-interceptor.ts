@@ -3,7 +3,7 @@
 // where extension module imports (chrome.runtime, @shared paths) are unavailable.
 // To keep them in sync, tests/injected/fetch-interceptor-constants.test.ts
 // asserts that these values match the shared constants.
-import { findUserObjects, findFollowedHandles, extractFollowingFromUsers, dedupeFollowHandles, extractProfileEntries, type ProfileEntry } from './data-extractors';
+import { findUserObjects, extractFollowingFromUsers, extractNotFollowingFromUsers, extractFollowingListHandles, dedupeFollowHandles, extractProfileEntries, isFollowingEndpoint, type ProfileEntry } from './data-extractors';
 import { FiberFollowObserver } from './fiber-follow-observer';
 import { FollowBridge, type FollowSource } from './follow-bridge';
 import { splitProfileBatches } from './profile-batches';
@@ -80,8 +80,7 @@ window.fetch = async function patchedFetch(
       // extractViewerUserId 제거: viewer ID 메시지를 수신하는 리스너 없음.
       // 계정 감지는 content script의 detectAndHandleAccountSwitch()에서 DOM 기반으로 처리.
 
-      const urlLower = url.toLowerCase();
-      if (urlLower.includes('follow')) {
+      if (isFollowingEndpoint(url)) {
         extractFollowData(data, accountAtRequest);
       }
     } catch {
@@ -124,7 +123,7 @@ XMLHttpRequest.prototype.send = function patchedXhrSend(body?: Document | XMLHtt
         extractUserData(data, endpoint, accountAtRequest);
         // extractViewerUserId 제거: viewer ID 메시지를 수신하는 리스너 없음.
       // 계정 감지는 content script의 detectAndHandleAccountSwitch()에서 DOM 기반으로 처리.
-        if (url.toLowerCase().includes('follow')) {
+        if (isFollowingEndpoint(url)) {
           extractFollowData(data, accountAtRequest);
         }
       } catch {
@@ -190,6 +189,8 @@ function postTimelineFollowData(
       matches.length > 0 ? pathCounts : '(no following flag found)',
     );
   }
+  // 팔로우 안 함으로 확인된 핸들도 보내 오염된 목록을 정리한다 — content 측은 followSet에 있는 것만 지운다
+  followBridge.send(extractNotFollowingFromUsers(users), 'api-not-following', account);
   if (handles.length === 0) return;
   fiberFollowObserver.markReported(handles);
   followBridge.send(handles, 'api-timeline', account);
@@ -198,9 +199,7 @@ function postTimelineFollowData(
 // extractViewerUserId / findViewerId 제거됨 — 수신 리스너 없는 죽은 코드
 
 function extractFollowData(data: unknown, account?: string | null): void {
-  const handles: string[] = [];
-  findFollowedHandles(data, handles);
-  const uniqueHandles = [...new Set(handles.map((handle) => handle.toLowerCase()))];
+  const uniqueHandles = extractFollowingListHandles(data);
   if (uniqueHandles.length > 0) {
     fiberFollowObserver.markReported(uniqueHandles);
     followBridge.send(uniqueHandles, undefined, account);
