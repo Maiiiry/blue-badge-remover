@@ -154,6 +154,36 @@ describe('classifyTweet', () => {
     expect(result.action).toBe('show');
   });
 
+  // 필터링 범위 토글이 꺼진 화면에서는 리트윗 경로도 숨기지 않는다
+  it('필터링 범위가 꺼진 화면의 파딱 리트윗 = show (page-filter-off)', () => {
+    const result = classifyTweet(makeInput({ isRetweet: true, pageType: 'bookmarks' }));
+    expect(result.action).toBe('show');
+    expect(result.reason).toBe('page-filter-off');
+  });
+
+  it('키워드 필터 ON + 매칭 됨이어도 필터링 범위가 꺼진 화면의 파딱 리트윗 = show', () => {
+    const result = classifyTweet(makeInput({
+      isRetweet: true,
+      pageType: 'bookmarks',
+      settings: { ...defaultSettings, keywordFilterEnabled: true },
+      activeFilterRules: [{ type: 'keyword', value: '비트코인' }],
+      profile: { handle: 'fadak_user', displayName: '파딱유저', bio: '비트코인 전문가' },
+      tweetText: '',
+    }));
+    expect(result.action).toBe('show');
+    expect(result.reason).toBe('page-filter-off');
+  });
+
+  it('필터링 범위가 켜진 화면의 파딱 리트윗은 그대로 숨긴다 (regression)', () => {
+    const result = classifyTweet(makeInput({
+      isRetweet: true,
+      pageType: 'bookmarks',
+      settings: { ...defaultSettings, filter: { ...defaultSettings.filter, bookmarks: true } },
+    }));
+    expect(result.action).toBe('hide');
+    expect(result.reason).toBe('retweet');
+  });
+
   // --- A6: 리트위터 팔로우/화이트리스트 예외 ---
 
   it('리트윗 + 리트위터 팔로우 = show (retweeter-follow)', () => {
@@ -233,6 +263,7 @@ describe('classifyQuote', () => {
       parentIsWhitelisted: false,
       retweeterExempt: false,
       settings: defaultSettings,
+      pageType: 'timeline',
       ...overrides,
     };
   }
@@ -342,5 +373,23 @@ describe('classifyQuote', () => {
     }));
     expect(result.action).toBe('hide-entire');
     expect(result.reason).toBe('quote-fadak');
+  });
+
+  // 필터링 범위 토글이 꺼진 화면에서는 인용 숨김도 적용하지 않는다
+  it.each(['quote-only', 'entire'] as const)('필터링 범위가 꺼진 화면의 인용 파딱 + quoteMode=%s = show (page-filter-off)', (quoteMode) => {
+    const result = classifyQuote(makeQuoteInput({
+      pageType: 'bookmarks',
+      settings: { ...defaultSettings, quoteMode },
+    }));
+    expect(result.action).toBe('show');
+    expect(result.reason).toBe('page-filter-off');
+  });
+
+  it('필터링 범위가 켜진 화면의 인용 파딱은 그대로 숨긴다 (regression)', () => {
+    const result = classifyQuote(makeQuoteInput({
+      pageType: 'bookmarks',
+      settings: { ...defaultSettings, quoteMode: 'entire', filter: { ...defaultSettings.filter, bookmarks: true } },
+    }));
+    expect(result.action).toBe('hide-entire');
   });
 });
