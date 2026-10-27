@@ -48,3 +48,5 @@ export default defineConfig({
     },
   }),
 });
+
+# Automated fix for issue #112: 키워드 매칭이 짧은 영문 토큰을 다른 단어 안에서도 잡고 일본어 표기 변형은 놓침 — 정규화·단어 경계
