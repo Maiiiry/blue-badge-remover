@@ -1,6 +1,6 @@
 // tests/content/page-utils.test.ts
 import { describe, it, expect, beforeEach } from 'vitest';
-import { isProfilePage, getPageType, getAccountHandleFromDOM } from '../../src/content/page-utils';
+import { isProfilePage, getPageType, getAccountHandleFromDOM, getDetailAuthorHandle } from '../../src/content/page-utils';
 
 function setPath(path: string): void {
   Object.defineProperty(window, 'location', {
@@ -90,6 +90,17 @@ describe('getPageType', () => {
     expect(getPageType()).toBe('search');
   });
 
+  // 리뷰: search로 시작하는 핸들(searchfan 등)의 상세가 검색으로 판정되던 문제 (#94)
+  it.each([
+    ['/searchfan/status/200', 'replies'],
+    ['/searchfan/status/200/photo/1', 'replies'],
+    ['/search', 'search'],
+    ['/i/lists/123', 'lists'],
+  ] as const)('%s → %s', (path, expected) => {
+    setPath(path);
+    expect(getPageType()).toBe(expected);
+  });
+
   it('should return replies for status page', () => {
     setPath('/user/status/123456');
     expect(getPageType()).toBe('replies');
@@ -164,5 +175,21 @@ describe('getAccountHandleFromDOM', () => {
     addProfileLink('/i/flow/login');
     addAccountSwitcher('temi_illust');
     expect(getAccountHandleFromDOM()).toBe('temi_illust');
+  });
+});
+
+// 상세 페이지에서 연 트윗의 작성자 — 그 작성자의 루트·타래 트윗은 숨기지 않는다 (#94)
+describe('getDetailAuthorHandle', () => {
+  it.each([
+    ['/Author_A/status/123', 'author_a'],
+    ['/author_a/status/123/photo/1', 'author_a'],
+  ])('%s → %s', (path, expected) => {
+    setPath(path);
+    expect(getDetailAuthorHandle()).toBe(expected);
+  });
+
+  it.each(['/i/status/123', '/i/web/status/123', '/home', '/author_a', '/search', '/author_a/likes'])('%s → null', (path) => {
+    setPath(path);
+    expect(getDetailAuthorHandle()).toBeNull();
   });
 });

@@ -23,6 +23,8 @@ export interface ClassifyInput {
   profile: ProfileInfo | null;
   tweetText: string;
   pageType: PageType;
+  /** 트윗 상세에서 들어간 트윗의 글쓴이 — 설정이 켜져 있으면 그 글쓴이의 앞뒤 타래는 숨기지 않는다 (#94) */
+  isDetailAuthor: boolean;
 }
 
 export interface ClassifyResult {
@@ -40,6 +42,8 @@ export interface QuoteClassifyInput {
   quotedIsWhitelisted: boolean;
   /** 인용된 계정이 로그인한 본인 — 본인 트윗은 인용 카드 안에서도 숨기지 않는다 (#88) */
   quotedIsCurrentUser: boolean;
+  /** 인용한 트윗이 상세 글쓴이의 트윗 — 글쓴이 타래 보기가 켜져 있으면 통째로 숨기지 않는다 (#94) */
+  parentIsDetailAuthor: boolean;
   parentHandle: string;
   parentInFollow: boolean;
   parentIsWhitelisted: boolean;
@@ -62,6 +66,7 @@ export function classifyTweet(input: ClassifyInput): ClassifyResult {
 
   // 팔로우/화이트리스트 예외
   if (inFollow || isWhitelisted) return { action: 'show', reason: inFollow ? 'follow' : 'whitelist' };
+  if (input.isDetailAuthor && settings.showAuthorThread) return { action: 'show', reason: 'detail-author' };
   if (profile && matchesProtectedKeyword(profile, input.protectedKeywords)) {
     return { action: 'show', reason: 'protected-keyword' };
   }
@@ -110,6 +115,11 @@ export function classifyTweet(input: ClassifyInput): ClassifyResult {
   return hide ? { action: 'hide', reason: 'fadak' } : { action: 'show', reason: 'page-filter-off' };
 }
 
+/** 숨김 방식 — 트윗 상세에서는 설정에 따라 완전 제거 대신 접어 두고 펼쳐볼 수 있게 한다 (#94) */
+export function resolveHideMode(settings: Settings, pageType: PageType): Settings['hideMode'] {
+  return pageType === 'replies' && settings.collapseOnDetail ? 'collapse' : settings.hideMode;
+}
+
 /** 파딱 리트윗 분류 — 필터링 범위가 꺼진 화면이면 리트윗 필터와 무관하게 표시 */
 function classifyRetweet(settings: Settings, pageType: PageType, match: Partial<Pick<ClassifyResult, 'matchedRule' | 'packId' | 'category'>> = {}): ClassifyResult {
   if (!isPageFilterEnabled(settings, pageType)) return { action: 'show', reason: 'page-filter-off' };
@@ -122,10 +132,12 @@ function classifyRetweet(settings: Settings, pageType: PageType, match: Partial<
 export function classifyQuote(input: QuoteClassifyInput): QuoteClassifyResult {
   const { quotedHandle, quotedIsFadak, quotedInFollow, quotedIsWhitelisted, quotedIsCurrentUser, parentHandle, parentInFollow, parentIsWhitelisted, retweeterExempt, settings, pageType } = input;
   const parentExempt = parentInFollow || parentIsWhitelisted;
+  const parentDetailExempt = input.parentIsDetailAuthor && settings.showAuthorThread;
 
-  // self-quote: 예외 부모(팔로우/화이트리스트)가 자기 트윗을 인용
-  if (quotedHandle !== null && quotedHandle.toLowerCase() === parentHandle.toLowerCase() && parentExempt) {
-    return { action: 'show', reason: parentInFollow ? 'self-quote-followed' : 'self-quote-whitelisted' };
+  // self-quote: 예외 부모(팔로우/화이트리스트/상세 글쓴이)가 자기 트윗을 인용
+  if (quotedHandle !== null && quotedHandle.toLowerCase() === parentHandle.toLowerCase()) {
+    if (parentExempt) return { action: 'show', reason: parentInFollow ? 'self-quote-followed' : 'self-quote-whitelisted' };
+    if (parentDetailExempt) return { action: 'show', reason: 'self-quote-detail-author' };
   }
 
   if (!quotedIsFadak) return { action: 'show', reason: 'not-fadak' };
@@ -139,6 +151,7 @@ export function classifyQuote(input: QuoteClassifyInput): QuoteClassifyResult {
     if (parentExempt || retweeterExempt) {
       return { action: 'hide-quote', reason: parentExempt ? 'quote-fadak-parent-exempt' : 'quote-fadak-retweeter-exempt' };
     }
+    if (parentDetailExempt) return { action: 'hide-quote', reason: 'quote-fadak-detail-author' };
     return { action: 'hide-entire', reason: 'quote-fadak' };
   }
   if (quoteAction === 'hide-quote') return { action: 'hide-quote', reason: 'quote-fadak' };
