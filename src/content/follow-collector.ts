@@ -3,7 +3,7 @@ import { browser } from 'wxt/browser';
 import { STORAGE_KEYS, TIMINGS } from '@shared/constants';
 import type { Settings } from '@shared/types';
 import { logger } from '@shared/utils/logger';
-import { getProfileLinkHref } from './page-utils';
+import { getAccountHandleFromDOM } from './page-utils';
 
 export interface FollowCollectorDeps {
   getCurrentSettings: () => Settings;
@@ -20,8 +20,7 @@ let followDebounceTimerId: ReturnType<typeof setTimeout> | null = null;
 const SYNC_BANNER_ID = 'bbr-follow-sync-banner';
 
 export function getMyHandle(): string | null {
-  const href = getProfileLinkHref();
-  return href ? href.slice(1).toLowerCase() : null;
+  return getAccountHandleFromDOM();
 }
 
 export function resolveAccountSwitchFollows(
@@ -51,17 +50,37 @@ export function runFollowStorageTask<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
+// 팔로우로 기록한 시각 — 그 전에 출발한 요청의 응답(following:false)이 방금 팔로우한 계정을 지우지 못하게 한다
+const RECENT_FOLLOW_GRACE_MS = 60_000;
+const recentFollowAt = new Map<string, number>();
+
+export function isRecentlyFollowed(handle: string, now = Date.now()): boolean {
+  const at = recentFollowAt.get(handle.toLowerCase());
+  return at !== undefined && now - at < RECENT_FOLLOW_GRACE_MS;
+}
+
 export function saveFollowHandles(
   handles: string[],
   deps: FollowCollectorDeps,
   expectedAccount?: string,
 ): Promise<void> {
   if (!handles.length) return Promise.resolve();
+  const now = Date.now();
+  for (const handle of handles) recentFollowAt.set(handle.toLowerCase(), now);
   return runFollowStorageTask(() => doSaveFollowHandles(handles, deps, expectedAccount));
 }
 
 export function removeFollowHandle(handle: string, deps: FollowCollectorDeps): Promise<void> {
-  return runFollowStorageTask(() => doRemoveFollowHandle(handle, deps));
+  return removeFollowHandles([handle], deps);
+}
+
+export function removeFollowHandles(
+  handles: string[],
+  deps: FollowCollectorDeps,
+  expectedAccount?: string,
+): Promise<void> {
+  if (!handles.length) return Promise.resolve();
+  return runFollowStorageTask(() => doRemoveFollowHandles(handles, deps, expectedAccount));
 }
 
 export interface AccountSwitchResult {
@@ -121,16 +140,18 @@ async function doSaveFollowHandles(
   if (settings.debugMode) logger.info('Follow handles saved', { account: currentAccount, newCount: handles.length, totalCount: merged.length });
 }
 
-async function doRemoveFollowHandle(
-  handle: string,
+async function doRemoveFollowHandles(
+  handles: string[],
   deps: FollowCollectorDeps,
+  expectedAccount?: string,
 ): Promise<void> {
-  const lower = handle.toLowerCase();
+  const targets = new Set(handles.map((handle) => handle.toLowerCase()));
   const stored = await browser.storage.local.get([STORAGE_KEYS.FOLLOW_CACHE, STORAGE_KEYS.CURRENT_USER_ID]);
   const currentAccount = (stored[STORAGE_KEYS.CURRENT_USER_ID] as string | null) ?? '';
+  if (expectedAccount && currentAccount !== expectedAccount) return;
   const cache = (stored[STORAGE_KEYS.FOLLOW_CACHE] as Record<string, string[]> | undefined) ?? {};
   const existing = currentAccount ? (cache[currentAccount] ?? []) : [];
-  const filtered = existing.filter((h) => h !== lower);
+  const filtered = existing.filter((h) => !targets.has(h));
   if (currentAccount) {
     cache[currentAccount] = filtered;
   }
@@ -140,7 +161,7 @@ async function doRemoveFollowHandle(
   });
   deps.setFollowSet(new Set(filtered));
   const settings = deps.getCurrentSettings();
-  if (settings.debugMode) logger.info('Follow handle removed', { handle: lower, totalCount: filtered.length });
+  if (settings.debugMode) logger.info('Follow handles removed', { count: targets.size, totalCount: filtered.length });
 }
 
 function extractHandlesFromDOM(): string[] {

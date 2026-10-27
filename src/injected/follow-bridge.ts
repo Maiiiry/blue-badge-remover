@@ -1,4 +1,4 @@
-export type FollowSource = 'inline' | 'api-timeline' | undefined;
+export type FollowSource = 'inline' | 'api-timeline' | 'api-not-following' | undefined;
 
 type FollowEmitter = (handles: string[], source: FollowSource, account: string) => void;
 

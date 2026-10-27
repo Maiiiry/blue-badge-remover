@@ -120,11 +120,15 @@ body {
   font-size: 11px;
 }
 
+/* 브라우저 기본 화살표는 OS마다 위치가 달라 테두리에 붙는다 — 직접 그려 좌우 여백을 8px로 맞춘다 (#96) */
 .lang-selector select {
-  background: var(--surface-2);
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--surface-2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M.75.75 4 4 7.25.75' fill='none' stroke='%238C9AA5' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 8px center / 8px 5px;
   border: 1px solid var(--border-subtle);
   color: var(--text-primary);
-  padding: 4px 8px;
+  padding: 4px 24px 4px 8px;
+  line-height: 16px;
   border-radius: 0;
   font-size: 11px;
   font-family: inherit;
@@ -135,6 +139,11 @@ body {
 
 .lang-selector select:focus {
   border-color: var(--accent);
+}
+
+.lang-selector select option {
+  background: var(--surface-2);
+  color: var(--text-primary);
 }
 
 /* Sections */
@@ -346,6 +355,40 @@ h3 {
 
 .toggle-row:hover {
   opacity: 0.85;
+}
+
+/* 하위 토글 — 부모 토글에 딸린 옵션. 좌측 신호선(border 있으므로 radius 0) */
+.toggle-children {
+  margin: 0 0 6px 10px;
+  padding-left: 12px;
+  border-left: 3px solid var(--border-strong);
+  transition: opacity 0.15s, border-color 0.15s;
+}
+
+.toggle-children .toggle-row {
+  padding: 5px 0;
+}
+
+.toggle-children .hint {
+  margin: 0 0 6px;
+  line-height: 1.4;
+}
+
+.toggle-children.is-disabled {
+  opacity: 0.4;
+  border-left-color: var(--border-subtle);
+}
+
+.toggle-children.is-disabled .toggle-row {
+  cursor: default;
+}
+
+.toggle-children.is-disabled .toggle-row:hover {
+  opacity: 1;
+}
+
+input[type="checkbox"]:disabled {
+  cursor: default;
 }
 
 /* Checkbox toggle switch — interactive pill */

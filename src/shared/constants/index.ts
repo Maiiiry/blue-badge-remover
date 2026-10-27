@@ -19,15 +19,22 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultFilterEnabled: true,
   milestoneBannerEnabled: false,
   aggressorFilterEnabled: false,
+  // 기존 사용자의 상세 페이지 동작을 바꾸지 않도록 꺼진 채로 시작한다 (#94)
+  showAuthorThread: false,
+  collapseOnDetail: false,
 };
+
+/** X 핸들 형식 — DOM·MAIN world에서 읽은 핸들은 이 형식일 때만 신뢰한다 */
+export const X_HANDLE_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
 
 export const STORAGE_KEYS = {
   SETTINGS: 'settings',
   WHITELIST: 'whitelist',
-  FOLLOW_LIST: 'followList',
-  FOLLOW_CACHE: 'followCache',
+  // #68로 오염된 v1(followList·followCache·lastSyncAt)을 버리고 v2로 새로 모은다. 옛 키에 늦게 도착한 쓰기는 읽지 않는다 (#70)
+  FOLLOW_LIST: 'followListV2',
+  FOLLOW_CACHE: 'followCacheV2',
   CURRENT_USER_ID: 'currentUserId',
-  LAST_SYNC_AT: 'lastSyncAt',
+  LAST_SYNC_AT: 'lastSyncAtV2',
   CUSTOM_FILTER_LIST: 'customFilterList',
   COLLECTED_FADAKS: 'collectedFadaks',
   DISABLED_FILTER_CATEGORIES: 'disabledFilterCategories',

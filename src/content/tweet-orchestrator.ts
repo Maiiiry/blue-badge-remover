@@ -1,15 +1,14 @@
 // src/content/tweet-orchestrator.ts
 // 트윗 처리 오케스트레이터: DOM에서 트윗 정보를 추출하고, classifier로 판정하고, DOM을 조작.
 import { detectBadgeSvg, isBlueBadgeElement } from '@features/badge-detection/svg-fallback';
-import { hideTweet, hideQuoteBlock, showExpandedTweet, showTweet, showQuoteBlock, releasePreservedHeights, PRESERVED_HEIGHT_ATTR } from '@features/content-filter';
+import { hideTweet, hideQuoteBlock, showExpandedTweet, showTweet, showQuoteBlock } from '@features/content-filter';
 import { extractTweetAuthor, extractRetweeterName, extractRetweeterHandle, extractTweetStatusPath, findQuoteBlock, extractQuoteAuthor, extractDisplayName, extractTweetText, formatUserLabel, addDebugLabel, findAuthorBadge } from './tweet-processing';
-import { isProfilePage, isDetailPage, getPageType } from './page-utils';
-import { profileCache, getSettings, getWhitelistSet, getActiveFilterRules, getProtectedKeywords, getCurrentUserHandle, setCurrentUserHandle, isHandleFollowed, isHandleWhitelisted, getExpandedSet } from './state';
+import { isProfilePage, isDetailPage, getPageType, getDetailAuthorHandle } from './page-utils';
+import { profileCache, getSettings, getWhitelistSet, getActiveFilterRules, getProtectedKeywords, getCurrentUserHandle, setCurrentUserHandle, isHandleFollowed, isHandleWhitelisted, isCurrentUserHandle, getExpandedSet } from './state';
 import { bufferCollectedFadak } from './collector-buffer';
-import { classifyTweet, classifyQuote } from './tweet-classifier';
+import { classifyTweet, classifyQuote, resolveHideMode } from './tweet-classifier';
 import type { ClassifyResult, QuoteClassifyResult } from './tweet-classifier';
 import { recordHide } from '@features/stats';
-import { isScrollRestorationActive } from './navigation';
 import { logger } from '@shared/utils/logger';
 import { addToWhitelist } from '@features/settings';
 
@@ -107,21 +106,18 @@ function applyTweetResult(
     retweetedBy: retweeterName || undefined,
     category: result.category,
     matchedRule: result.matchedRule,
-    preserveHeight: isScrollRestorationActive(),
     onWhitelist: () => addToWhitelist(`@${handle}`),
   };
   if (statusPath && getExpandedSet().has(statusPath)) {
     showExpandedTweet(tweetEl, context, trackExpandedTweet);
   } else {
-    hideTweet(tweetEl, settings.hideMode, context, trackExpandedTweet);
+    hideTweet(tweetEl, resolveHideMode(settings, getPageType()), context, trackExpandedTweet);
   }
   recordHide(tweetEl, result.category, result.packId, statusPath);
   return true;
 }
 
 export function processTweet(tweetEl: HTMLElement): void {
-  // 창 종료 타이머를 놓쳐도(백그라운드 탭 타이머 지연 등) 보존 높이 여백이 남지 않게 한다 (#43)
-  if (tweetEl.hasAttribute(PRESERVED_HEIGHT_ATTR) && !isScrollRestorationActive()) releasePreservedHeights();
   if (isProfilePage()) return;
   const author = extractTweetAuthor(tweetEl);
   if (!author) return;
@@ -134,6 +130,7 @@ export function processTweet(tweetEl: HTMLElement): void {
   const displayName = extractDisplayName(tweetEl, handle);
   const userLabel = formatUserLabel(handle, displayName);
   const inFollow = isHandleFollowed(handle);
+  const isDetailAuthor = getDetailAuthorHandle() === handle.toLowerCase();
   const retweeter = getRetweeterContext(tweetEl, currentUserHandle);
   if (settings.debugMode) {
     const hasQuote = !!findQuoteBlock(tweetEl);
@@ -156,21 +153,27 @@ export function processTweet(tweetEl: HTMLElement): void {
     retweeterIsCurrentUser: retweeter.isCurrentUser,
     settings, activeFilterRules: getActiveFilterRules(), protectedKeywords: getProtectedKeywords(), profile, tweetText,
     pageType: getPageType(),
+    isDetailAuthor,
   });
   const authorHidden = applyTweetResult(tweetEl, result, handle, retweeter.isRetweet, statusPath, settings);
   let quoteHidden = false;
   if (settings.enabled) {
-    quoteHidden = processQuoteBlock(tweetEl, handle, inFollow, retweeter.exempt, settings, userLabel, statusPath);
+    quoteHidden = processQuoteBlock(tweetEl, { handle, inFollow, isDetailAuthor }, retweeter.exempt, settings, userLabel, statusPath);
   }
   if (!authorHidden && !quoteHidden && statusPath && getExpandedSet().delete(statusPath)) {
     if (tweetEl.hasAttribute('data-bbr-expanded')) showTweet(tweetEl);
   }
 }
 
+interface QuoteParent {
+  handle: string;
+  inFollow: boolean;
+  isDetailAuthor: boolean;
+}
+
 function processQuoteBlock(
   tweetEl: HTMLElement,
-  parentHandle: string,
-  parentInFollow: boolean,
+  parent: QuoteParent,
   retweeterExempt: boolean,
   settings: ReturnType<typeof getSettings>,
   userLabel: string,
@@ -188,10 +191,13 @@ function processQuoteBlock(
     quotedHandle, quotedIsFadak,
     quotedInFollow: isHandleFollowed(quotedHandle ?? ''),
     quotedIsWhitelisted: isHandleWhitelisted(quotedHandle ?? ''),
-    parentHandle, parentInFollow,
-    parentIsWhitelisted: isHandleWhitelisted(parentHandle),
+    quotedIsCurrentUser: quotedHandle !== null && isCurrentUserHandle(quotedHandle),
+    parentHandle: parent.handle, parentInFollow: parent.inFollow,
+    parentIsWhitelisted: isHandleWhitelisted(parent.handle),
+    parentIsDetailAuthor: parent.isDetailAuthor,
     retweeterExempt,
     settings,
+    pageType: getPageType(),
   });
 
   if (result.action === 'hide-entire') {
@@ -199,13 +205,12 @@ function processQuoteBlock(
       reason: QUOTE_ENTIRE_REASON,
       handle: `@${quotedHandle ?? ''}`,
       quotedBy: userLabel,
-      preserveHeight: isScrollRestorationActive(),
       onWhitelist: quotedHandle ? () => addToWhitelist(`@${quotedHandle}`) : undefined,
     };
     if (statusPath && getExpandedSet().has(statusPath)) {
       showExpandedTweet(tweetEl, context, trackExpandedTweet);
     } else {
-      hideTweet(tweetEl, settings.hideMode, context, trackExpandedTweet);
+      hideTweet(tweetEl, resolveHideMode(settings, getPageType()), context, trackExpandedTweet);
     }
     return true;
   }

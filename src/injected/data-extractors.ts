@@ -125,6 +125,39 @@ export function extractFollowingFromUsers(users: Array<Record<string, unknown>>)
   return matches;
 }
 
+// API가 명시적으로 '팔로우 안 함'이라고 알려준 핸들 — 오염된 팔로우 목록을 정리하는 근거.
+// 실측(2026-10 HomeTimeline): 팔로우 여부는 relationship_perspectives.following에만 true/false로 온다.
+// 목록에서 지우는 근거이므로 boolean false만 믿고, 필드가 없거나 다른 경로가 true면 판단하지 않는다.
+export function extractNotFollowingFromUsers(users: Array<Record<string, unknown>>): string[] {
+  const following = new Set(extractFollowingFromUsers(users).map((m) => m.handle));
+  const result = new Set<string>();
+  for (const user of users) {
+    const handle = extractScreenName(user);
+    if (!handle || following.has(handle)) continue;
+    const rel = user['relationship_perspectives'] as Record<string, unknown> | null | undefined;
+    if (rel?.['following'] === false) result.add(handle);
+  }
+  return [...result];
+}
+
+// Following 응답에서 팔로우 핸들 추출 — 같은 응답에서 following:false로 확인된 유저(추천 등)는 뺀다
+export function extractFollowingListHandles(data: unknown): string[] {
+  const handles: string[] = [];
+  findFollowedHandles(data, handles);
+  const users: Array<Record<string, unknown>> = [];
+  findUserObjects(data, users);
+  const notFollowing = new Set(extractNotFollowingFromUsers(users));
+  return [...new Set(handles.map((handle) => handle.toLowerCase()))].filter((handle) => !notFollowing.has(handle));
+}
+
+// GraphQL 오퍼레이션 이름(쿼리스트링 앞 경로의 마지막 세그먼트)이 정확히 Following인지 본다.
+// X가 모든 GraphQL 요청 쿼리스트링에 responsive_web_grok_analyze_post_followups_enabled 플래그를 붙이면서
+// url.includes('follow')가 항상 참이 되어 모든 응답의 작성자가 팔로우로 저장되었다. Followers 목록도 제외한다.
+export function isFollowingEndpoint(url: string): boolean {
+  const path = url.split(/[?#]/)[0] ?? '';
+  return path.slice(path.lastIndexOf('/') + 1) === 'Following';
+}
+
 // 배치(단일 응답) 내 중복 핸들만 제거하는 순수 함수 — 호출 간 상태를 갖지 않는다.
 // 이전에는 영구 Set(postedFollowHandles)으로 이미 포스트한 핸들을 기억했으나,
 // 이는 (1) ISOLATED 리스너 부착 전 포스트된 메시지 유실, (2) INITIAL_SETUP_DELAY 시점

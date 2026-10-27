@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { DEFAULT_SETTINGS } from '../../src/shared/constants';
 
@@ -24,18 +24,16 @@ const mockShowExpandedTweet = vi.fn();
 const mockShowTweet = vi.fn();
 const mockHideQuoteBlock = vi.fn();
 const mockShowQuoteBlock = vi.fn();
-const mockReleasePreservedHeights = vi.fn();
 vi.mock('@features/content-filter', () => ({
   shouldHideTweet: vi.fn().mockReturnValue(true),
   shouldHideRetweet: vi.fn().mockReturnValue(true),
+  isPageFilterEnabled: vi.fn().mockReturnValue(true),
   getQuoteAction: vi.fn().mockReturnValue('none' as const),
   hideTweet: (...args: unknown[]) => mockHideTweet(...args),
   showExpandedTweet: (...args: unknown[]) => mockShowExpandedTweet(...args),
   hideQuoteBlock: (...args: unknown[]) => mockHideQuoteBlock(...args),
   showTweet: (...args: unknown[]) => mockShowTweet(...args),
   showQuoteBlock: (...args: unknown[]) => mockShowQuoteBlock(...args),
-  releasePreservedHeights: (...args: unknown[]) => mockReleasePreservedHeights(...args),
-  PRESERVED_HEIGHT_ATTR: 'data-bbr-preserved-height',
   setTweetHiderLanguage: vi.fn(),
   FeedObserver: class { observe() {} disconnect() {} },
 }));
@@ -55,7 +53,7 @@ vi.mock('@shared/utils/logger', () => ({
   logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
 
-import { getQuoteAction } from '@features/content-filter';
+import { getQuoteAction, isPageFilterEnabled } from '@features/content-filter';
 import {
   setSettings,
   setFollowSet,
@@ -65,6 +63,7 @@ import {
   getExpandedSet,
 } from '../../src/content/state';
 import { processTweet, restoreHiddenTweets, applyCurrentUserFallback } from '../../src/content/tweet-orchestrator';
+import { listenForNavigation, stopListeningForNavigation } from '../../src/content/navigation';
 
 let doc: Document;
 
@@ -158,6 +157,7 @@ beforeEach(() => {
   mockIsBlueBadgeElement.mockReturnValue(true);
   // vi.clearAllMocks는 mockReturnValue를 지우지 않으므로 per-test override 누수 방지
   vi.mocked(getQuoteAction).mockReturnValue('none');
+  vi.mocked(isPageFilterEnabled).mockReturnValue(true);
 });
 
 describe('processTweet', () => {
@@ -460,6 +460,39 @@ describe('processTweet', () => {
     );
     expect(mockHideQuoteBlock).not.toHaveBeenCalled();
   });
+
+  it('필터링 범위가 꺼진 화면(북마크)에서는 인용 파딱이 있어도 숨기지 않는다', () => {
+    const originalLocation = window.location;
+    Object.defineProperty(window, 'location', {
+      value: { ...originalLocation, pathname: '/i/bookmarks' }, writable: true, configurable: true,
+    });
+    try {
+      vi.mocked(isPageFilterEnabled).mockImplementation((_settings, pageType) => pageType !== 'bookmarks');
+      vi.mocked(getQuoteAction).mockReturnValue('hide-entire');
+      mockDetectBadgeSvg.mockReturnValue(true);
+      const tweet = createTweetEl('author_a');
+      appendQuoteBlock(tweet, { badge: true });
+      processTweet(tweet);
+      expect(isPageFilterEnabled).toHaveBeenCalledWith(expect.anything(), 'bookmarks');
+      expect(mockHideTweet).not.toHaveBeenCalled();
+      expect(mockHideQuoteBlock).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(window, 'location', { value: originalLocation, writable: true, configurable: true });
+    }
+  });
+
+  it('범위를 끈 뒤 다시 판정하면 인용 파딱으로 숨겨졌던 트윗을 복원한다', () => {
+    vi.mocked(isPageFilterEnabled).mockReturnValue(false);
+    vi.mocked(getQuoteAction).mockReturnValue('hide-entire');
+    mockDetectBadgeSvg.mockReturnValue(true);
+    const tweet = createTweetEl('author_a');
+    appendQuoteBlock(tweet, { badge: true });
+    tweet.setAttribute('data-bbr-original', 'hidden');
+    tweet.setAttribute('data-bbr-reason', 'quote-entire');
+    processTweet(tweet);
+    expect(mockShowTweet).toHaveBeenCalledWith(tweet);
+    expect(mockHideTweet).not.toHaveBeenCalled();
+  });
 });
 
 // --- A5: applyCurrentUserFallback ---
@@ -502,27 +535,48 @@ describe('applyCurrentUserFallback', () => {
 });
 
 
-// #43: 창 종료 타이머를 놓쳐도 보존 높이가 남지 않게 하는 안전장치
-describe('processTweet — 보존 높이 안전장치', () => {
-  it('복원 창 밖에서 보존 표시가 남은 트윗을 만나면 보존 높이를 해제한다', () => {
-    const tweet = createTweetEl('someone');
-    tweet.setAttribute('data-bbr-original', 'hidden');
-    tweet.setAttribute('data-bbr-preserved-height', '662');
-    doc.querySelector('main')!.appendChild(tweet);
-
-    processTweet(tweet);
-
-    expect(mockReleasePreservedHeights).toHaveBeenCalledTimes(1);
+// 뒤로가기 팝인: 높이를 보존한 채 숨기면 빈 영역이 보였다가 2초 뒤 접히며 스크롤이 튄다
+describe('processTweet — 뒤로가기 직후 숨김', () => {
+  afterEach(() => {
+    stopListeningForNavigation();
   });
 
-  it('보존 표시가 없으면 해제하지 않는다', () => {
-    const tweet = createTweetEl('someone');
+  it('popstate 직후에도 높이를 보존하지 않고 바로 숨긴다', () => {
+    listenForNavigation();
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    const tweet = createTweetEl('testuser', { badge: true });
     doc.querySelector('main')!.appendChild(tweet);
-    mockReleasePreservedHeights.mockClear();
 
     processTweet(tweet);
 
-    expect(mockReleasePreservedHeights).not.toHaveBeenCalled();
+    expect(mockHideTweet).toHaveBeenCalledTimes(1);
+    expect(mockHideTweet.mock.calls[0]![2]).not.toHaveProperty('preserveHeight');
+  });
+});
+
+// 실제 X DOM (2026-10 Aside 실측): 리트위터 링크가 socialContext를 바깥에서 감싼다
+describe('processTweet — 리트위터 링크가 socialContext를 감싼 DOM', () => {
+  function createWrappedRepost(author: string, retweeter: string): HTMLElement {
+    const article = createTweetEl(author, { badge: true });
+    const wrapper = doc.createElement('a');
+    wrapper.setAttribute('role', 'link');
+    wrapper.setAttribute('href', `/${retweeter}`);
+    const social = doc.createElement('span');
+    social.setAttribute('data-testid', 'socialContext');
+    social.textContent = `${retweeter} 님이 재게시함`;
+    wrapper.appendChild(social);
+    article.prepend(wrapper);
+    return article;
+  }
+
+  it('팔로우한 사람이 재게시한 파딱 트윗은 숨기지 않는다', () => {
+    setFollowSet(new Set(['friend']));
+    const tweet = createWrappedRepost('fadak_author', 'friend');
+    doc.querySelector('main')!.appendChild(tweet);
+
+    processTweet(tweet);
+
+    expect(mockHideTweet).not.toHaveBeenCalled();
   });
 });
 
@@ -550,5 +604,73 @@ describe('restoreHiddenTweets', () => {
     restoreHiddenTweets();
 
     expect(mockShowTweet).toHaveBeenCalledWith(tweet);
+  });
+});
+
+// #94: 상세 페이지에서는 글쓴이의 앞뒤 타래를 숨기지 않고, 다른 파딱 답글은 펼쳐볼 수 있게 접어 둔다
+describe('processTweet — 트윗 상세 페이지', () => {
+  const originalLocation = window.location;
+  const DETAIL_ON = { ...DEFAULT_SETTINGS, showAuthorThread: true, collapseOnDetail: true };
+
+  function withStatusLink(article: HTMLElement, path: string): HTMLElement {
+    const link = doc.createElement('a');
+    link.setAttribute('href', path);
+    link.appendChild(doc.createElement('time'));
+    article.appendChild(link);
+    return article;
+  }
+
+  beforeEach(() => {
+    Object.defineProperty(window, 'location', {
+      value: { ...originalLocation, pathname: '/Author_A/status/200' }, writable: true, configurable: true,
+    });
+    setSettings(DETAIL_ON);
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, 'location', { value: originalLocation, writable: true, configurable: true });
+  });
+
+  it('기본값(두 토글 꺼짐)에서는 기존처럼 글쓴이의 다른 트윗도 완전 제거한다', () => {
+    setSettings({ ...DEFAULT_SETTINGS });
+    const root = withStatusLink(createTweetEl('author_a', { badge: true }), '/author_a/status/100');
+    processTweet(root);
+    expect(mockHideTweet).toHaveBeenCalledWith(root, 'remove', expect.objectContaining({ reason: 'fadak' }), expect.any(Function));
+  });
+
+  it('들어간 트윗 글쓴이의 루트·타래 트윗은 숨기지 않는다', () => {
+    const root = withStatusLink(createTweetEl('author_a', { badge: true }), '/author_a/status/100');
+    processTweet(root);
+    expect(mockHideTweet).not.toHaveBeenCalled();
+  });
+
+  it('다른 파딱의 답글은 숨김 방식이 완전 제거여도 접어 둔다', () => {
+    const reply = withStatusLink(createTweetEl('other_fadak', { badge: true }), '/other_fadak/status/300');
+    processTweet(reply);
+    expect(mockHideTweet).toHaveBeenCalledWith(reply, 'collapse', expect.objectContaining({ reason: 'fadak' }), expect.any(Function));
+  });
+
+  it('상세 접어 두기를 끄면 숨김 방식(완전 제거)을 따른다', () => {
+    setSettings({ ...DETAIL_ON, collapseOnDetail: false });
+    const reply = withStatusLink(createTweetEl('other_fadak', { badge: true }), '/other_fadak/status/300');
+    processTweet(reply);
+    expect(mockHideTweet).toHaveBeenCalledWith(reply, 'remove', expect.anything(), expect.any(Function));
+  });
+
+  it('다른 파딱을 인용한 글쓴이 트윗은 인용 숨김이 트윗 전체여도 인용 카드만 숨긴다', () => {
+    vi.mocked(getQuoteAction).mockReturnValue('hide-entire');
+    mockDetectBadgeSvg.mockReturnValue(true);
+    const root = withStatusLink(createTweetEl('author_a', { badge: true }), '/author_a/status/100');
+    appendQuoteBlock(root, { badge: true });
+    processTweet(root);
+    expect(mockHideTweet).not.toHaveBeenCalled();
+    expect(mockHideQuoteBlock).toHaveBeenCalled();
+  });
+
+  it('글쓴이 타래 보기를 끄면 글쓴이의 다른 트윗도 지금처럼 숨긴다', () => {
+    setSettings({ ...DETAIL_ON, showAuthorThread: false });
+    const root = withStatusLink(createTweetEl('author_a', { badge: true }), '/author_a/status/100');
+    processTweet(root);
+    expect(mockHideTweet).toHaveBeenCalledWith(root, 'collapse', expect.objectContaining({ reason: 'fadak' }), expect.any(Function));
   });
 });

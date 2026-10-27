@@ -5,6 +5,9 @@ import {
   extractFollowingFromUsers,
   dedupeFollowHandles,
   extractProfileEntries,
+  extractNotFollowingFromUsers,
+  extractFollowingListHandles,
+  isFollowingEndpoint,
   type FollowingUserMatch,
 } from '../../src/injected/data-extractors';
 
@@ -392,5 +395,78 @@ describe('dedupeFollowHandles', () => {
     const second = dedupeFollowHandles([match('a')]);
     expect(first).toEqual(['a']);
     expect(second).toEqual(['a']);
+  });
+});
+
+describe('isFollowingEndpoint', () => {
+  // X가 모든 GraphQL 요청 쿼리스트링에 붙이는 feature 플래그 — 이름에 'followups'가 들어 있다
+  const FLAGS = 'features=%7B%22responsive_web_grok_analyze_post_followups_enabled%22%3Atrue%7D';
+
+  it('GraphQL 오퍼레이션이 Following이면 true', () => {
+    expect(isFollowingEndpoint(`https://x.com/i/api/graphql/abc123/Following?variables=%7B%7D&${FLAGS}`)).toBe(true);
+    expect(isFollowingEndpoint('/i/api/graphql/abc123/Following')).toBe(true);
+  });
+
+  it('쿼리스트링에만 follow가 들어 있는 다른 오퍼레이션은 false', () => {
+    expect(isFollowingEndpoint(`https://x.com/i/api/graphql/abc123/HomeTimeline?variables=%7B%7D&${FLAGS}`)).toBe(false);
+    expect(isFollowingEndpoint(`https://x.com/i/api/graphql/abc123/Likes?${FLAGS}`)).toBe(false);
+  });
+
+  it.each(['Followers', 'BlueVerifiedFollowers', 'FollowersYouKnow'])('팔로워 목록(%s)은 팔로잉 목록이 아니므로 false', (operation) => {
+    expect(isFollowingEndpoint(`https://x.com/i/api/graphql/abc123/${operation}?${FLAGS}`)).toBe(false);
+  });
+});
+
+describe('extractNotFollowingFromUsers', () => {
+  it('relationship_perspectives.following === false인 핸들만 소문자로 추출', () => {
+    const users = [
+      { core: { screen_name: 'Stranger' }, relationship_perspectives: { following: false } },
+      { core: { screen_name: 'Friend' }, relationship_perspectives: { following: true } },
+      { core: { screen_name: 'NoRelation' } },
+      { core: { screen_name: 'NullRelation' }, relationship_perspectives: null },
+    ];
+    expect(extractNotFollowingFromUsers(users)).toEqual(['stranger']);
+  });
+
+  it('다른 경로가 following=true면 팔로우 중으로 본다', () => {
+    const users = [{ core: { screen_name: 'Mixed' }, following: true, relationship_perspectives: { following: false } }];
+    expect(extractNotFollowingFromUsers(users)).toEqual([]);
+  });
+
+  it('같은 응답에서 true로도 나온 핸들은 팔로우 중으로 본다', () => {
+    const users = [
+      { core: { screen_name: 'Twice' }, relationship_perspectives: { following: false } },
+      { core: { screen_name: 'twice' }, relationship_perspectives: { following: true } },
+    ];
+    expect(extractNotFollowingFromUsers(users)).toEqual([]);
+  });
+
+  it('boolean false가 아닌 값은 판단하지 않는다', () => {
+    const users = [
+      { core: { screen_name: 'Str' }, relationship_perspectives: { following: 'false' } },
+      { core: { screen_name: 'Zero' }, relationship_perspectives: { following: 0 } },
+    ];
+    expect(extractNotFollowingFromUsers(users)).toEqual([]);
+  });
+
+  it('배치 내 중복 핸들은 한 번만 반환한다', () => {
+    const users = [
+      { core: { screen_name: 'Dup' }, relationship_perspectives: { following: false } },
+      { core: { screen_name: 'dup' }, relationship_perspectives: { following: false } },
+    ];
+    expect(extractNotFollowingFromUsers(users)).toEqual(['dup']);
+  });
+});
+
+describe('extractFollowingListHandles', () => {
+  it('Following 응답의 user_results 핸들을 소문자로 모으되, 같은 응답에서 following:false인 유저는 뺀다', () => {
+    const data = {
+      entries: [
+        { user_results: { result: { rest_id: '1', is_blue_verified: false, core: { screen_name: 'Friend' }, relationship_perspectives: { following: true } } } },
+        { user_results: { result: { rest_id: '2', is_blue_verified: true, core: { screen_name: 'Suggested' }, relationship_perspectives: { following: false } } } },
+        { user_results: { result: { rest_id: '3', is_blue_verified: false, core: { screen_name: 'NoRelation' } } } },
+      ],
+    };
+    expect(extractFollowingListHandles(data)).toEqual(['friend', 'norelation']);
   });
 });

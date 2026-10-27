@@ -25,6 +25,17 @@ beforeEach(() => {
   doc = new JSDOM('<!DOCTYPE html><body></body>').window.document;
 });
 
+// 실제 X DOM (2026-10 Aside 실측): 리트위터 링크가 socialContext를 바깥에서 감싼다
+function wrappedRepost(retweeter: string, contextText: string, author: string, authorName: string): string {
+  return `
+    <article data-testid="tweet">
+      <a role="link" href="/${retweeter}"><span data-testid="socialContext">${contextText}</span></a>
+      <a role="link" href="/${author}">${authorName}</a>
+      <a role="link" href="/${author}">@${author}</a>
+    </article>
+  `;
+}
+
 // --- extractTweetAuthor ---
 
 describe('extractTweetAuthor', () => {
@@ -116,6 +127,11 @@ describe('extractTweetAuthor', () => {
     `);
     expect(extractTweetAuthor(el)?.handle).toBe('original_author');
   });
+
+  it('socialContext를 감싼 리트위터 링크도 로케일과 무관하게 건너뜀', () => {
+    const el = html(wrappedRepost('NASA', 'NASAさんがリポストしました', 'Nasdaq', 'Nasdaq'));
+    expect(extractTweetAuthor(el)?.handle).toBe('Nasdaq');
+  });
 });
 
 // --- extractRetweeterName ---
@@ -150,6 +166,11 @@ describe('extractRetweeterName', () => {
 // --- extractRetweeterHandle ---
 
 describe('extractRetweeterHandle', () => {
+  it('socialContext를 감싼 링크 href에서 핸들 추출', () => {
+    const el = html(wrappedRepost('NASA', 'NASA 님이 재게시함', 'Nasdaq', 'Nasdaq'));
+    expect(extractRetweeterHandle(el)).toBe('NASA');
+  });
+
   it('socialContext 링크 href에서 핸들 추출', () => {
     const el = html(`
       <article>
@@ -201,6 +222,32 @@ describe('extractRetweeterHandle', () => {
 // --- findQuoteBlock ---
 
 describe('findQuoteBlock', () => {
+  // 실제 X DOM (2026-10 실측): 인용 카드는 User-Name을 품은 div[role="link"], 라벨은 화면 언어를 따른다
+  it('라벨이 다른 언어여도 User-Name을 품은 div[role="link"]를 인용 카드로 찾음', () => {
+    const el = html(`
+      <article data-testid="tweet">
+        <div data-testid="User-Name"><a role="link" href="/author">Author</a></div>
+        <div>
+          <div>引用</div>
+          <div role="link" tabindex="0" id="ja-quote">
+            <div data-testid="User-Name"><a href="/quoted">Quoted</a></div>
+          </div>
+        </div>
+      </article>
+    `);
+    expect(findQuoteBlock(el)?.id).toBe('ja-quote');
+  });
+
+  it('User-Name이 없는 div[role="link"](링크 카드 등)는 인용 카드로 보지 않음', () => {
+    const el = html(`
+      <article data-testid="tweet">
+        <div data-testid="User-Name"><a role="link" href="/author">Author</a></div>
+        <div role="link" tabindex="0"><span>링크 미리보기</span></div>
+      </article>
+    `);
+    expect(findQuoteBlock(el)).toBeNull();
+  });
+
   it('한국어 "인용" 레이블로 인용 블록 탐지', () => {
     const el = html(`
       <article>
@@ -305,6 +352,11 @@ describe('extractTweetText', () => {
 // --- extractDisplayName ---
 
 describe('extractDisplayName', () => {
+  it('본인 글을 재게시해도 socialContext를 감싼 링크 문구를 이름으로 쓰지 않음', () => {
+    const el = html(wrappedRepost('NASA', 'NASAさんがリポストしました', 'NASA', 'NASA'));
+    expect(extractDisplayName(el, 'NASA')).toBe('NASA');
+  });
+
   it('핸들과 일치하는 링크에서 표시 이름 추출', () => {
     const el = html(`
       <article>

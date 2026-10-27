@@ -1,11 +1,11 @@
 // src/content/message-handler.ts
 // MAIN world(fetch-interceptor)에서 postMessage로 전달되는 데이터 수신 처리.
-import { MESSAGE_TYPES } from '@shared/constants';
+import { MESSAGE_TYPES, X_HANDLE_PATTERN } from '@shared/constants';
 import { logger } from '@shared/utils/logger';
 import { profileCache, collectorBuffer, getSettings, getFollowSet, getProtectedKeywords, getCurrentUserHandle } from './state';
 import { extractRetweeterHandle, extractTweetAuthor } from './tweet-processing';
 import { processTweet } from './tweet-orchestrator';
-import { saveFollowHandles, getMyHandle, type FollowCollectorDeps } from './follow-collector';
+import { saveFollowHandles, removeFollowHandles, isRecentlyFollowed, getMyHandle, type FollowCollectorDeps } from './follow-collector';
 import { removeFadakBanner } from './fadak-banner';
 import type { ProfileInfo } from '@shared/types';
 
@@ -19,9 +19,8 @@ interface ProfilePayload {
   followingCount?: unknown;
 }
 
-type FollowSource = 'inline' | 'api-timeline';
+type FollowSource = 'inline' | 'api-timeline' | 'api-not-following';
 
-const X_HANDLE_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
 const MAX_PROFILE_BATCH = 1000;
 const MAX_DISPLAY_NAME_LENGTH = 100;
 const MAX_BIO_LENGTH = 2000;
@@ -125,7 +124,7 @@ function isFollowDataPayload(data: unknown): data is { handles: unknown[]; accou
   return Array.isArray(d['handles'])
     && typeof d['account'] === 'string'
     && X_HANDLE_PATTERN.test(d['account'])
-    && (source === undefined || source === 'inline' || source === 'api-timeline');
+    && (source === undefined || source === 'inline' || source === 'api-timeline' || source === 'api-not-following');
 }
 
 export function listenForMessages(followCollectorDeps: FollowCollectorDeps): void {
@@ -189,6 +188,10 @@ function handleFollowData(data: { handles: unknown[]; account: string; source?: 
   if (!Array.isArray(data.handles)) return;
   const handles = sanitizeFollowHandles(data.handles);
 
+  if (data.source === 'api-not-following') {
+    removeNotFollowing(handles, followCollectorDeps, data.account);
+    return;
+  }
   if (data.source === 'inline' || data.source === 'api-timeline') {
     // inline(fiber) + api-timeline 공통 경로 — 즉시 followSet 업데이트 + storage 저장.
     // Storm guard: 전부 이미 아는 핸들이면 storage 쓰기/재처리 없이 조기 반환.
@@ -224,4 +227,18 @@ function handleFollowData(data: { handles: unknown[]; account: string; source?: 
       });
     }
   }
+}
+
+// API가 팔로우 안 함으로 확인한 핸들을 목록에서 뺀다 — 예전 버그로 오염된 목록이 탐색 중에 스스로 정리된다.
+// 방금 팔로우한 계정(그 전에 출발한 요청의 응답일 수 있음)과 본인 핸들은 건드리지 않는다.
+function removeNotFollowing(handles: string[], followCollectorDeps: FollowCollectorDeps, account: string): void {
+  const followSet = getFollowSet();
+  const self = getCurrentUserHandle()?.toLowerCase();
+  const stale = [...new Set(handles.map((h) => h.toLowerCase()))]
+    .filter((h) => followSet.has(h) && h !== self && !isRecentlyFollowed(h));
+  if (stale.length === 0) return;
+  for (const h of stale) followSet.delete(h);
+  if (getSettings().debugMode) logger.debug('Not-following handles removed', { count: stale.length });
+  void removeFollowHandles(stale, followCollectorDeps, account);
+  scheduleFollowReprocess(stale);
 }

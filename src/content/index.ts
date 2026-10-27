@@ -1,16 +1,16 @@
 // src/content/index.ts
 // Content script 진입점. 초기화 + 모듈 연결만 담당.
 import { browser } from 'wxt/browser';
-import { FeedObserver, setTweetHiderLanguage, releasePreservedHeights } from '@features/content-filter';
+import { FeedObserver, setTweetHiderLanguage } from '@features/content-filter';
 import { getSettings as loadSettings, getWhitelist, addToWhitelist } from '@features/settings';
 import { MESSAGE_TYPES, STORAGE_KEYS, TIMINGS } from '@shared/constants';
 import { logger } from '@shared/utils/logger';
 import { showFadakProfileBanner, showFadakDetailBanner, removeFadakBanner } from './fadak-banner';
-import { listenForNavigation, setOnNavigate, setOnScrollRestorationEnd } from './navigation';
+import { listenForNavigation, setOnNavigate } from './navigation';
 import { collectFollowsFromDOM, disconnectFollowObserver, listenForFollowButtonClicks, getMyHandle, switchFollowAccount } from './follow-collector';
-import { isProfilePage, getProfileLinkHref } from './page-utils';
+import { isProfilePage, getAccountHandleFromDOM } from './page-utils';
 import { observeSettingsShortcut } from './settings-shortcut';
-import { setSettings, setFollowSet, setWhitelistSet, setProtectedKeywords, setCurrentUserHandle, getSettings, getFollowSet, getProtectedKeywords, getCurrentUserHandle, isHandleFollowed, isHandleWhitelisted, profileCache, collectorBuffer } from './state';
+import { setSettings, setFollowSet, setWhitelistSet, setProtectedKeywords, setCurrentUserHandle, getSettings, getFollowSet, getProtectedKeywords, getCurrentUserHandle, isHandleFollowed, isHandleWhitelisted, isCurrentUserHandle, profileCache, collectorBuffer } from './state';
 import { flushCollector } from './collector-buffer';
 import { loadFilterRules } from './filter-pipeline';
 import { processTweet, restoreHiddenTweets, reprocessExistingTweets, applyCurrentUserFallback } from './tweet-orchestrator';
@@ -34,6 +34,7 @@ const fadakBannerDeps = {
   isProfilePage,
   isHandleFollowed,
   isHandleWhitelisted,
+  isCurrentUser: isCurrentUserHandle,
   getCurrentSettings: () => getSettings(),
   addToWhitelist,
 };
@@ -47,9 +48,7 @@ const followCollectorDeps = {
 };
 
 async function detectAndHandleAccountSwitch(): Promise<boolean> {
-  const href = getProfileLinkHref();
-  if (!href) return false;
-  const currentHandle = href.slice(1).toLowerCase();
+  const currentHandle = getAccountHandleFromDOM();
   if (!currentHandle) return false;
 
   const switched = await switchFollowAccount(currentHandle);
@@ -60,6 +59,9 @@ async function detectAndHandleAccountSwitch(): Promise<boolean> {
     if (settings.debugMode) logger.info('Account switched', { from: switched.from, to: currentHandle, cachedFollows: switched.follows.length });
     restoreHiddenTweets();
     reprocessExistingTweets();
+    // 계정이 바뀌면 본인 여부가 달라진다 — 배너를 새 계정 기준으로 다시 맞춘다 (#88)
+    showFadakProfileBanner(fadakBannerDeps);
+    showFadakDetailBanner(fadakBannerDeps);
   }
   return true;
 }
@@ -73,11 +75,11 @@ function signalContentReady(): void {
 
 function startAccountSwitchWatcher(): void {
   if (accountSwitchTimerId !== null) clearInterval(accountSwitchTimerId);
-  let lastHref = getProfileLinkHref() ?? '';
+  let lastHandle = getAccountHandleFromDOM();
   accountSwitchTimerId = setInterval(() => {
-    const href = getProfileLinkHref() ?? '';
-    if (href && href !== lastHref) {
-      lastHref = href;
+    const handle = getAccountHandleFromDOM();
+    if (handle && handle !== lastHandle) {
+      lastHandle = handle;
       void detectAndHandleAccountSwitch().then(() => signalContentReady());
     }
   }, TIMINGS.ACCOUNT_SWITCH_POLL);
@@ -85,14 +87,14 @@ function startAccountSwitchWatcher(): void {
 
 function startObserving(): void {
   const feed = document.querySelector('main') ?? document.body;
-  feedObserver.observe(feed);
+  // X는 이동해도 main을 유지한다 — 연결을 유지해야 새로 그려진 트윗을 첫 페인트 전에 숨긴다
+  feedObserver.ensureObserving(feed);
 }
 
 function handleNavigate(): void {
   const settings = getSettings();
   if (settings.keywordCollectorEnabled) void flushCollector();
   void flushStats();
-  feedObserver.disconnect();
   removeFadakBanner();
   if (!window.location.pathname.includes('/following')) {
     disconnectFollowObserver();
@@ -182,8 +184,6 @@ async function init(): Promise<void> {
   syncHoverCardObserver(settings);
 
   setOnNavigate(handleNavigate);
-  // 뒤로가기/모달 닫기 후 높이 보존 창이 끝나면 보존한 높이를 해제 (#43)
-  setOnScrollRestorationEnd(releasePreservedHeights);
   listenForNavigation();
   observeSettingsShortcut();
   collectFollowsFromDOM(followCollectorDeps);
@@ -196,9 +196,9 @@ async function init(): Promise<void> {
   if (settings.debugMode) {
     const allStorage = await browser.storage.local.get(null);
     logger.debug('Storage state', {
-      followCount: ((allStorage['followList'] as string[]) ?? []).length,
+      followCount: ((allStorage[STORAGE_KEYS.FOLLOW_LIST] as string[]) ?? []).length,
       whitelistCount: ((allStorage['whitelist'] as string[]) ?? []).length,
-      lastSyncAt: allStorage['lastSyncAt'],
+      lastSyncAt: allStorage[STORAGE_KEYS.LAST_SYNC_AT],
     });
     logger.info('Blue Badge Remover initialized');
   }

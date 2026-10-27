@@ -19,3 +19,13 @@ describe('background language wiring', () => {
     expect(source).not.toContain('keepLegacyLanguageOnUpdate');
   });
 });
+
+describe('background follow list reset wiring', () => {
+  // #70: 오염된 v1 팔로우 데이터를 설치·업데이트 때 지운다 (새 코드는 v2 키만 사용)
+  it('설치·업데이트 때 v1 팔로우 데이터를 지운다', () => {
+    const source = readFileSync(resolve(process.cwd(), 'entrypoints/background.ts'), 'utf8');
+
+    expect(source).toContain("import { removeLegacyFollowData } from '@features/settings/follow-list-reset'");
+    expect(source).toContain("if (details.reason === 'install' || details.reason === 'update') void removeLegacyFollowData()");
+  });
+});

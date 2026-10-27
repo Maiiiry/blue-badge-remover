@@ -1,6 +1,6 @@
 // src/content/tweet-classifier.ts
 // 순수 분류 함수: DOM 접근 없이 입력 데이터만으로 트윗 숨김 판정.
-import { shouldHideTweet, shouldHideRetweet, getQuoteAction, type PageType } from '@features/content-filter';
+import { shouldHideTweet, shouldHideRetweet, getQuoteAction, isPageFilterEnabled, type PageType } from '@features/content-filter';
 import { isAggressorProfile, matchesKeywordFilter, matchesProtectedKeyword } from '@features/keyword-filter';
 import type { FilterRule, Settings, ProfileInfo, KeywordMatchResult } from '@shared/types';
 
@@ -23,6 +23,8 @@ export interface ClassifyInput {
   profile: ProfileInfo | null;
   tweetText: string;
   pageType: PageType;
+  /** 트윗 상세에서 들어간 트윗의 글쓴이 — 설정이 켜져 있으면 그 글쓴이의 앞뒤 타래는 숨기지 않는다 (#94) */
+  isDetailAuthor: boolean;
 }
 
 export interface ClassifyResult {
@@ -38,11 +40,16 @@ export interface QuoteClassifyInput {
   quotedIsFadak: boolean;
   quotedInFollow: boolean;
   quotedIsWhitelisted: boolean;
+  /** 인용된 계정이 로그인한 본인 — 본인 트윗은 인용 카드 안에서도 숨기지 않는다 (#88) */
+  quotedIsCurrentUser: boolean;
+  /** 인용한 트윗이 상세 글쓴이의 트윗 — 글쓴이 타래 보기가 켜져 있으면 통째로 숨기지 않는다 (#94) */
+  parentIsDetailAuthor: boolean;
   parentHandle: string;
   parentInFollow: boolean;
   parentIsWhitelisted: boolean;
   retweeterExempt: boolean;
   settings: Settings;
+  pageType: PageType;
 }
 
 export interface QuoteClassifyResult {
@@ -59,6 +66,7 @@ export function classifyTweet(input: ClassifyInput): ClassifyResult {
 
   // 팔로우/화이트리스트 예외
   if (inFollow || isWhitelisted) return { action: 'show', reason: inFollow ? 'follow' : 'whitelist' };
+  if (input.isDetailAuthor && settings.showAuthorThread) return { action: 'show', reason: 'detail-author' };
   if (profile && matchesProtectedKeyword(profile, input.protectedKeywords)) {
     return { action: 'show', reason: 'protected-keyword' };
   }
@@ -86,10 +94,7 @@ export function classifyTweet(input: ClassifyInput): ClassifyResult {
     }
     // 활성화된 조건 중 하나라도 매칭됨 — 숨김 진행, 키워드 매칭 정보가 있으면 포함
     if (isRetweet) {
-      const shouldHide = shouldHideRetweet({ settings, isFadak: true, isRetweet: true });
-      return shouldHide
-        ? { action: 'hide', reason: 'retweet', matchedRule: result.matchedRule, packId: result.packId, category: result.category }
-        : { action: 'show', reason: 'retweet-filter-off' };
+      return classifyRetweet(settings, pageType, { matchedRule: result.matchedRule, packId: result.packId, category: result.category });
     }
     const hide = shouldHideTweet({
       settings, followList: EMPTY_SET as Set<string>, whitelist: EMPTY_SET as Set<string>,
@@ -101,10 +106,7 @@ export function classifyTweet(input: ClassifyInput): ClassifyResult {
   }
 
   // 키워드 필터 비활성 — 전체 파딱 숨김
-  if (isRetweet) {
-    const shouldHide = shouldHideRetweet({ settings, isFadak: true, isRetweet: true });
-    return shouldHide ? { action: 'hide', reason: 'retweet' } : { action: 'show', reason: 'retweet-filter-off' };
-  }
+  if (isRetweet) return classifyRetweet(settings, pageType);
 
   const hide = shouldHideTweet({
     settings, followList: EMPTY_SET as Set<string>, whitelist: EMPTY_SET as Set<string>,
@@ -113,18 +115,35 @@ export function classifyTweet(input: ClassifyInput): ClassifyResult {
   return hide ? { action: 'hide', reason: 'fadak' } : { action: 'show', reason: 'page-filter-off' };
 }
 
+/** 숨김 방식 — 트윗 상세에서는 설정에 따라 완전 제거 대신 접어 두고 펼쳐볼 수 있게 한다 (#94) */
+export function resolveHideMode(settings: Settings, pageType: PageType): Settings['hideMode'] {
+  return pageType === 'replies' && settings.collapseOnDetail ? 'collapse' : settings.hideMode;
+}
+
+/** 파딱 리트윗 분류 — 필터링 범위가 꺼진 화면이면 리트윗 필터와 무관하게 표시 */
+function classifyRetweet(settings: Settings, pageType: PageType, match: Partial<Pick<ClassifyResult, 'matchedRule' | 'packId' | 'category'>> = {}): ClassifyResult {
+  if (!isPageFilterEnabled(settings, pageType)) return { action: 'show', reason: 'page-filter-off' };
+  return shouldHideRetweet({ settings, isFadak: true, isRetweet: true })
+    ? { action: 'hide', reason: 'retweet', ...match }
+    : { action: 'show', reason: 'retweet-filter-off' };
+}
+
 /** 인용 트윗 분류 (순수 함수) */
 export function classifyQuote(input: QuoteClassifyInput): QuoteClassifyResult {
-  const { quotedHandle, quotedIsFadak, quotedInFollow, quotedIsWhitelisted, parentHandle, parentInFollow, parentIsWhitelisted, retweeterExempt, settings } = input;
+  const { quotedHandle, quotedIsFadak, quotedInFollow, quotedIsWhitelisted, quotedIsCurrentUser, parentHandle, parentInFollow, parentIsWhitelisted, retweeterExempt, settings, pageType } = input;
   const parentExempt = parentInFollow || parentIsWhitelisted;
+  const parentDetailExempt = input.parentIsDetailAuthor && settings.showAuthorThread;
 
-  // self-quote: 예외 부모(팔로우/화이트리스트)가 자기 트윗을 인용
-  if (quotedHandle !== null && quotedHandle.toLowerCase() === parentHandle.toLowerCase() && parentExempt) {
-    return { action: 'show', reason: parentInFollow ? 'self-quote-followed' : 'self-quote-whitelisted' };
+  // self-quote: 예외 부모(팔로우/화이트리스트/상세 글쓴이)가 자기 트윗을 인용
+  if (quotedHandle !== null && quotedHandle.toLowerCase() === parentHandle.toLowerCase()) {
+    if (parentExempt) return { action: 'show', reason: parentInFollow ? 'self-quote-followed' : 'self-quote-whitelisted' };
+    if (parentDetailExempt) return { action: 'show', reason: 'self-quote-detail-author' };
   }
 
   if (!quotedIsFadak) return { action: 'show', reason: 'not-fadak' };
+  if (quotedIsCurrentUser) return { action: 'show', reason: 'quoted-self' };
   if (quotedInFollow || quotedIsWhitelisted) return { action: 'show', reason: quotedInFollow ? 'follow' : 'whitelist' };
+  if (!isPageFilterEnabled(settings, pageType)) return { action: 'show', reason: 'page-filter-off' };
 
   const quoteAction = getQuoteAction(settings, true);
   if (quoteAction === 'hide-entire') {
@@ -132,6 +151,7 @@ export function classifyQuote(input: QuoteClassifyInput): QuoteClassifyResult {
     if (parentExempt || retweeterExempt) {
       return { action: 'hide-quote', reason: parentExempt ? 'quote-fadak-parent-exempt' : 'quote-fadak-retweeter-exempt' };
     }
+    if (parentDetailExempt) return { action: 'hide-quote', reason: 'quote-fadak-detail-author' };
     return { action: 'hide-entire', reason: 'quote-fadak' };
   }
   if (quoteAction === 'hide-quote') return { action: 'hide-quote', reason: 'quote-fadak' };

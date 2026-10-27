@@ -2,11 +2,13 @@
 import { t, type Language, DEFAULT_LANGUAGE } from '@shared/i18n';
 import {
   ORIGINAL_CONTENT_KEY, HIDE_REASON_ATTR, COLLAPSED_ATTR, EXPANDED_ATTR,
-  EXPANDED_ACTIONS_ATTR, HIDDEN_QUOTE_ATTR, PRESERVED_HEIGHT_ATTR,
+  EXPANDED_ACTIONS_ATTR, HIDDEN_QUOTE_ATTR,
 } from './hide-attrs';
-import { hideKeepingHeight, markPreservedPlaceholder } from './preserved-height';
 
 const STYLE_INJECTED_ATTR = 'data-bbr-styles';
+// remove 모드에서 숨긴 트윗이 남기는 높이. 0에 가깝게 접으면 X 가상 리스트가 뒤로가기 위치 복원을
+// 어긋나게 한다 (#74 실측, 위치 유지: 약 1px 19/21, 2px 19/20, 8px 30/30).
+const REMOVED_CELL_HEIGHT = '8px';
 
 let currentLanguage: Language = DEFAULT_LANGUAGE;
 
@@ -54,7 +56,6 @@ export interface HideContext {
   quotedBy?: string;
   category?: string;
   matchedRule?: string;
-  preserveHeight?: boolean;
   onWhitelist?: () => void | Promise<void>;
 }
 
@@ -162,18 +163,18 @@ export function hideTweet(
   context?: HideContext,
   onExpandedChange?: ExpandedChangeHandler,
 ): void {
-  if (element.hasAttribute(ORIGINAL_CONTENT_KEY)) return;
+  const hiddenAs = element.getAttribute(ORIGINAL_CONTENT_KEY);
+  if (hiddenAs !== null) {
+    // 같은 article이 타임라인·상세를 오가며 다시 쓰이면 숨김 방식이 달라질 수 있다 — 같으면 그대로 둔다 (#94)
+    if (hiddenAs === (mode === 'remove' ? 'hidden' : 'collapsed')) return;
+    showTweet(element);
+  }
   if (element.hasAttribute(EXPANDED_ATTR)) return;
-  const preservedHeight = context?.preserveHeight
-    ? Math.ceil(element.getBoundingClientRect().height)
-    : 0;
 
   if (mode === 'remove') {
-    if (preservedHeight > 0) {
-      hideKeepingHeight(element, preservedHeight);
-    } else {
-      element.style.display = 'none';
-    }
+    element.style.visibility = 'hidden';
+    element.style.height = REMOVED_CELL_HEIGHT;
+    element.style.overflow = 'hidden';
     element.setAttribute(ORIGINAL_CONTENT_KEY, 'hidden');
     element.setAttribute(HIDE_REASON_ATTR, context?.reason ?? 'unknown');
     return;
@@ -194,7 +195,6 @@ export function hideTweet(
   placeholder.setAttribute(COLLAPSED_ATTR, 'true');
   placeholder.className = 'bbr-placeholder';
   placeholder.innerHTML = SHIELD_ICON;
-  if (preservedHeight > 0) markPreservedPlaceholder(element, placeholder, preservedHeight);
 
   const textSpan = document.createElement('span');
   textSpan.textContent = label;
@@ -241,12 +241,11 @@ export function hideQuoteBlock(quoteElement: HTMLElement, context?: HideQuoteCon
 export function showTweet(element: HTMLElement): void {
   element.style.display = '';
   element.style.visibility = '';
-  element.style.pointerEvents = '';
-  element.style.minHeight = '';
+  element.style.height = '';
+  element.style.overflow = '';
   element.removeAttribute(ORIGINAL_CONTENT_KEY);
   element.removeAttribute(HIDE_REASON_ATTR);
   element.removeAttribute(EXPANDED_ATTR);
-  element.removeAttribute(PRESERVED_HEIGHT_ATTR);
   element.querySelector(`[${EXPANDED_ACTIONS_ATTR}]`)?.remove();
 
   // 직접 자식 placeholder만 제거 — 인용 블록 안의 placeholder는 유지
